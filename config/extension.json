@@ -1,0 +1,22 @@
+{
+  "type": "io.github.appinventor.legospikeprime.LegoSpikePrime",
+  "name": "LEGO SPIKE Prime",
+  "version": "9",
+  "dateBuilt": "2025-06-08",
+  "categoryString": "EXTENSION",
+  "helpString": "Extension for controlling LEGO SPIKE Prime hubs using BluetoothLE",
+  "showOnPalette": true,
+  "nonVisible": true,
+  "iconName": "aiwebres/legospike.png",
+  "external": true,
+  "permissions": [
+    "android.permission.BLUETOOTH",
+    "android.permission.BLUETOOTH_ADMIN",
+    "android.permission.BLUETOOTH_CONNECT",
+    "android.permission.BLUETOOTH_SCAN",
+    "android.permission.ACCESS_FINE_LOCATION"
+  ],
+  "androidMinSdk": 18,
+  "assets": []
+}
+
