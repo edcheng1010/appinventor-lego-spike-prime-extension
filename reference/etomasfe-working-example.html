@@ -1,0 +1,902 @@
+<html>
+<head>
+    <title>Spike Control Remot</title>  
+</head>
+<body>
+    <h1>Spike Control Remot</h1>
+    <style>
+        td{width:33%;background-color:beige;text-align:center;}
+        .altres{box-shadow:2px 4px 4px 0 rgba(0,0,0,0.6);}
+        .boto{height:100%;width:100%;user-select:none;
+             background-image:linear-gradient(#c1bcbc,#8080808a,#c1bcbc,white);  
+              box-shadow:2px 4px 4px 0 rgba(0,0,0,0.6);
+              position:relative;
+              
+             }
+        .boto:active{
+              top: 1px;
+              left:1px; 
+        }
+        #connectButton,#stopButton{
+            font-size:x-large;
+             border-radius:50%;
+             background-image:linear-gradient(#a5cc9b,#ce2d2d61,#c1bcbc,white); 
+        }
+        #forwardButton{border-radius:60% 60% 0% 0%;font-size:-webkit-xxx-large;color:#0400ffb3;}
+        #reverseButton{border-radius:0% 0% 60% 60%;font-size:-webkit-xxx-large;color:#0400ffb3}
+        #leftButton{border-radius:60% 0% 0% 60%;font-size:-webkit-xxx-large;color:#0400ffb3}
+        #rightButton{border-radius:0% 60% 60% 0%;font-size:-webkit-xxx-large;color:#0400ffb3}
+    </style>
+    
+    <div style=background-color:rgba(0,0,255,0.2);height:8%;>      
+            <button id="connectButton" class=boto style=height:100%;width:40%;>Connecta't</button>
+            -----
+            <button id="stopButton" class=boto style=height:100%;width:40%; disabled>DESconnecta</button>
+    </div>
+    <div style=height:10%>
+        <h1>
+        <form >
+            <label >Motor1 .</label>
+            <select id=m1 class=altres style=scale:2 >
+                <option value=A selected>A</option>
+                <option value=B>B</option>
+                <option value=C>C</option>
+                <option value=D>D</option>
+                <option value=E>E</option>
+                <option value=F>F</option>
+            </select>
+            <label >. Reverse</label>
+            <input type=checkbox id=m1r value='yes' class=altres style=scale:2>
+            ----
+            <label>Motor2 .</label>
+            <select id=m2 class=altres style=scale:2>
+                <option value=A>A</option>
+                <option value=B selected>B</option>
+                <option value=C>C</option>
+                <option value=D>D</option>
+                <option value=E>E</option>
+                <option value=F>F</option>
+            </select>
+            <label>. Reverse</label>
+            <input type=checkbox id=m2r value='yes' class=altres style=scale:2>
+            <br>
+            <label class=altres>Power&nbsp&nbsp&nbsp&nbsp&nbsp&nbsp</label>
+            <input type=range id=power min=0 max=100 style=scale:1.5>
+
+        </form>
+        </h1>
+    </div>
+    <br>
+
+    <table width=100% height=60% id="mytab">
+        <tr>          
+            <td></td> <td> <input type=button id="forwardButton" class="boto" value="&#8593" disabled></td> <td></td>
+        </tr>
+        <tr>
+            <td><input type=button id="leftButton" class="boto" value="<<<" disabled></td> <td> </td> <td><input type=button id="rightButton" class="boto" value=">>>" disabled></td>
+        </tr>
+        <tr>
+            <td></td> <td> <input type=button id="reverseButton" class="boto" value="&#8595" disabled></td> <td></td>
+        </tr>
+    </table>
+    <div id="log" style=background-color:rgba(0,255,0,0.2)>...</div>
+       
+  
+
+    <script>
+//----------------------------------------------------------------------------------------------
+//----------------------------------------------------------------------------------------------
+//----------------------------------------------------------------------------------------------
+        
+        const HUB_NAME = ""; // Replace with your hub's name
+        const PYBRICKS_COMMAND_EVENT_CHAR_UUID = "0000fd02-0000-1000-8000-00805f9b34fb";
+        const SPIKE_SERVICE_UUID = "0000fd02-0000-1000-8000-00805f9b34fb";
+        const SPIKE_RX_UUID = "0000fd02-0001-1000-8000-00805f9b34fb";
+        const SPIKE_TX_UUID = "0000fd02-0002-1000-8000-00805f9b34fb";
+        const connectButton = document.getElementById("connectButton");
+        const forwardButton = document.getElementById("forwardButton");
+        const reverseButton = document.getElementById("reverseButton");
+        const stopButton = document.getElementById("stopButton");
+        const leftButton = document.getElementById("leftButton");
+        const rightButton = document.getElementById("rightButton");
+        const logDiv = document.getElementById("log");
+        const mytab= document.getElementById("mytab");
+
+        let device = null;
+        let commandCharacteristic = null;
+
+        function log(message) {
+            logDiv.innerHTML=message;
+            //logDiv.innerHTML += message + "<br>";
+            //logDiv.scrollTop = logDiv.scrollHeight; // Auto-scroll
+        }
+
+        connectButton.addEventListener("click", async () => {
+            try {
+                log("Requesting Bluetooth Device...");
+                device = await navigator.bluetooth.requestDevice({
+                    //acceptAllDevices: true,
+                    filters:  [{ services: [SPIKE_SERVICE_UUID] }],
+                    //filters:  [{ name: HUB_NAME }],  
+                    optionalServices: [SPIKE_SERVICE_UUID] // Use the full UUID
+                });
+
+                log("Connecting to GATT Server...");
+                const server = await device.gatt.connect();
+
+                log("Getting Service...");
+                const service = await server.getPrimaryService(SPIKE_SERVICE_UUID);
+
+                log("Getting Characteristic...RX");
+                //const charUUID="0000fd02-0001-1000-8000-00805f9b34fb"; 
+                commandCharacteristicRX = await service.getCharacteristic(SPIKE_RX_UUID);
+
+                log("Getting Characteristic...TX");
+                //const charUUID2="0000fd02-0002-1000-8000-00805f9b34fb"; 
+                commandCharacteristicTX = await service.getCharacteristic(SPIKE_TX_UUID);
+
+                log("Enabling Notifications...");
+                await commandCharacteristicTX.startNotifications();
+
+                log("Notifications started.");
+
+                commandCharacteristicTX.addEventListener('characteristicvaluechanged',
+                    handleData);
+
+                connectButton.disabled = true;
+                forwardButton.disabled = false;
+                reverseButton.disabled = false;
+                leftButton.disabled = false;
+                rightButton.disabled = false;
+                stopButton.disabled = false;
+
+                log("Ready to send commands.");
+                
+//-------------HERE ARE THE INITIAL FUNCTIONS TO START PLAYING----------------------------------------------
+                //await program_noti();
+                
+                await clear();
+                await sendFileUpload();
+                await transferChunk();               
+                await sendCommandStart();
+                waitForReady();
+
+            } catch (error) {
+                log("Error: " + error);
+                connectButton.disabled = false;  
+                forwardButton.disabled = true;
+                reverseButton.disabled = true;
+                leftButton.disabled = true;
+                rightButton.disabled = true;
+                stopButton.disabled = true;
+            }
+        });
+
+        stopButton.addEventListener("click", async () => {
+            await sendCommand("bye.bye.AB");
+            await device.gatt.disconnect();  
+            connectButton.disabled = false;  
+            forwardButton.disabled = true;
+            reverseButton.disabled = true;
+            leftButton.disabled = true;
+            rightButton.disabled = true;
+            stopButton.disabled = true;
+        });
+//------------------------------------------------------------------------------------
+//------------------------------------------------------------------------------------
+        
+        function convert(v1){
+            vs1="";
+            if (v1>=0) {
+                vs1="+";
+                if (v1<100) {
+                    vs1=vs1+"0";
+                    if (v1<10){
+                        vs1=vs1+"0";
+                    }                
+                }
+                vs1=vs1+v1.toString();
+            }
+            else {
+                vs1="-";
+                if (v1>-100){
+                    vs1=vs1+"0";
+                    if (v1>-10){
+                        vs1=vs1+"0";
+                    }
+                }
+                v1=-v1;
+                vs1=vs1+v1.toString();
+            }            
+            return vs1;
+        }
+
+        async function f_r(){
+            v=document.getElementById("power").value;
+            v1=v;v2=v;
+            m1r=document.getElementById("m1r").checked;
+            m2r=document.getElementById("m2r").checked;
+            if (m1r) v1=v*-1;
+            n1=convert(v1);
+            if (m2r) v2=v*-1;
+            n2=convert(v2);
+            m1=document.getElementById("m1").value;
+            m2=document.getElementById("m2").value;
+            await sendCommand(m1+n1+m2+n2);
+            //await sendCommand("A"+n1+"B"+n2);
+        }
+        forwardButton.addEventListener("touchstart", async () => {
+            f_r();
+        });
+        forwardButton.addEventListener("mousedown", async () => {
+            f_r();
+        });
+
+        async function f_s(){
+            n1=convert(0);
+            n2=convert(0);
+            m1=document.getElementById("m1").value;
+            m2=document.getElementById("m2").value;
+            await sendCommand(m1+n1+m2+n2);
+            //await sendCommand("A"+n1+"B"+n2);
+        }
+        forwardButton.addEventListener("touchend", async () => {
+            f_s();
+        });
+        forwardButton.addEventListener("mouseup", async () => {
+            f_s();
+        });
+
+
+        
+        reverseButton.addEventListener("touchstart", async () => {
+           v=parseInt(document.getElementById("power").value);
+            v=-v;
+            m1r=document.getElementById("m1r").checked;
+            m2r=document.getElementById("m2r").checked;
+            if (m1r) v1=-v; else v1=v;
+            n1=convert(v1);
+            if (m2r) v2=-v; else v2=v
+            n2=convert(v2);         
+            m1=document.getElementById("m1").value;
+            m2=document.getElementById("m2").value;
+            await sendCommand(m1+n1+m2+n2);
+            //await sendCommand("A"+n1+"B"+n2);
+        });
+        reverseButton.addEventListener("mousedown", async () => {
+           v=parseInt(document.getElementById("power").value);
+            v=-v;
+            m1r=document.getElementById("m1r").checked;
+            m2r=document.getElementById("m2r").checked;
+            if (m1r) v1=-v; else v1=v;
+            n1=convert(v1);
+            if (m2r) v2=-v; else v2=v;
+            n2=convert(v2);         
+            m1=document.getElementById("m1").value;
+            m2=document.getElementById("m2").value;
+            await sendCommand(m1+n1+m2+n2);
+            //await sendCommand("A"+n1+"B"+n2);
+        });
+
+        async function r_s(){
+            n1=convert(0);
+            n2=convert(0);
+            m1=document.getElementById("m1").value;
+            m2=document.getElementById("m2").value;
+            await sendCommand(m1+n1+m2+n2);
+            //await sendCommand("A"+n1+"B"+n2);
+        }
+        reverseButton.addEventListener("mouseup", async () => {
+            r_s();
+        });
+        reverseButton.addEventListener("touchend", async () => {
+            r_s();
+        });
+
+        async function l_r(){
+            v=document.getElementById("power").value;
+            v1=v;v2=v;
+            m1r=document.getElementById("m1r").checked;
+            m2r=document.getElementById("m2r").checked;
+            if (m1r) v1=v*-1;
+            n1=convert(v1);
+            n2=convert(0);
+            m1=document.getElementById("m1").value;
+            m2=document.getElementById("m2").value;
+            await sendCommand(m1+n1+m2+n2);
+            //await sendCommand("A"+n1+"B"+n2);
+        }
+        leftButton.addEventListener("mousedown", async () => {
+            l_r();
+        });
+        leftButton.addEventListener("touchstart", async () => {
+            l_r();
+        });
+
+        async function l_s(){
+            n1=convert(0);
+            n2=convert(0);
+            m1=document.getElementById("m1").value;
+            m2=document.getElementById("m2").value;
+            await sendCommand(m1+n1+m2+n2);
+            //await sendCommand("A"+n1+"B"+n2);
+        }
+        leftButton.addEventListener("mouseup", async () => {
+            l_s();
+        });
+        leftButton.addEventListener("touchend", async () => {
+            l_s();
+        });
+
+        async function r_r(){
+            n1=convert(0);
+            v=document.getElementById("power").value;
+            v1=v;v2=v;
+            m1r=document.getElementById("m1r").checked;
+            m2r=document.getElementById("m2r").checked;
+            if (m2r) v2=v*-1;
+            n2=convert(v2);
+            m1=document.getElementById("m1").value;
+            m2=document.getElementById("m2").value;
+            await sendCommand(m1+n1+m2+n2);
+            //await sendCommand("A"+n1+"B"+n2);
+        }
+        rightButton.addEventListener("mousedown", async () => {
+            r_r();
+        });
+         rightButton.addEventListener("touchstart", async () => {
+            r_r();
+        });
+
+        async function r_s(){
+            n1=convert(0);
+            n2=convert(0);
+            m1=document.getElementById("m1").value;
+            m2=document.getElementById("m2").value;
+            await sendCommand(m1+n1+m2+n2);
+            //await sendCommand("A"+n1+"B"+n2);
+        }
+        rightButton.addEventListener("mouseup", async () => {
+            r_s();
+        });
+        rightButton.addEventListener("touchend", async () => {
+            r_s();
+        });
+
+        window.addEventListener(`contextmenu`, (e) => e.preventDefault());
+//-------------------------------------------------------------------------------------------
+const DELIMITER = 0x02; 
+const NO_DELIMITER = 255; 
+const MAX_BLOCK_SIZE = 84; 
+const COBS_CODE_OFFSET = 2; 
+const XOR = 0x03 
+
+function pack(data) {
+    let buffer = encode(data);
+    for (let i = 0; i < buffer.length; i++) {
+        buffer[i] ^= XOR;
+    }
+    // add delimiter
+    buffer.push(DELIMITER);
+    return new Uint8Array(buffer);
+}
+
+function encode(data) {
+
+    let buffer = [];
+    let code_index = 0;
+    let block = 0;
+
+    function begin_block() {
+        /**Append code word to buffer and update code_index and block */
+        code_index = buffer.length; // index of incomplete code word
+        buffer.push(NO_DELIMITER); // updated later if delimiter is encountered
+        block = 1; // no. of bytes in block (incl. code word)
+    }
+
+    begin_block();
+
+    for (let i = 0; i < data.length; i++) {
+        const byte = data[i];
+
+        if (byte > DELIMITER) {
+            // non-delimeter value, write as-is
+            buffer.push(byte);
+            block += 1;
+        }
+
+        if (byte <= DELIMITER || block > MAX_BLOCK_SIZE) {
+            // block completed because size limit reached or delimiter found
+            if (byte <= DELIMITER) {
+                // reason for block completion is delimiter
+                // update code word to reflect block size
+                const delimiter_base = byte * MAX_BLOCK_SIZE;
+                const block_offset = block + COBS_CODE_OFFSET;
+                buffer[code_index] = delimiter_base + block_offset;
+            }
+            // begin new block
+            begin_block();
+        }
+    }
+
+    // update final code word
+    buffer[code_index] = block + COBS_CODE_OFFSET;
+
+    return buffer;
+}
+//--------------------------------------------------------
+
+function unpack(frame) {
+
+    let start = 0;
+    let uint8Frame;
+
+    // Ensure `frame` is a Uint8Array
+    if (frame instanceof Uint8Array) {
+        uint8Frame = frame;
+    } else {
+        uint8Frame = new Uint8Array(frame); // Convert to Uint8Array if it's not already
+    }
+
+    if (uint8Frame[0] === 0x01) {
+        start += 1;
+    }
+
+    // Unframe and XOR
+    const unframed = new Uint8Array(Array.from(uint8Frame.slice(start, uint8Frame.length - 1)).map(x => x ^ XOR));
+
+    return decode(unframed); // Decode expects a Uint8Array, and returns one
+}
+//---------------------------------------------------------
+function decode(data) {
+
+    let buffer = [];
+
+    function unescape(code) {
+        /**Decode code word, returning value and block size */
+        if (code === NO_DELIMITER) {
+            // no delimiter in block
+            return [null, MAX_BLOCK_SIZE + 1];
+        }
+        let value = Math.floor((code - COBS_CODE_OFFSET) / MAX_BLOCK_SIZE); // Use Math.floor for integer division
+        let block = (code - COBS_CODE_OFFSET) % MAX_BLOCK_SIZE; // Use % for modulo operation
+        if (block === 0) {
+            // maximum block size ending with delimiter
+            block = MAX_BLOCK_SIZE;
+            value -= 1;
+        }
+        return [value, block];
+    }
+
+    let [value, block] = unescape(data[0]);
+
+    for (let i = 1; i < data.length; i++) { // first byte already processed
+        const byte = data[i];
+        block -= 1;
+        if (block > 0) {
+            buffer.push(byte);
+            continue;
+        }
+
+        // block completed
+        if (value !== null) {
+            buffer.push(value);
+        }
+
+        [value, block] = unescape(byte);
+    }
+
+    return new Uint8Array(buffer);
+}
+//------------------------------------------------------------------------------------------
+//-----------------------------------------------------------------------------------------
+        function handleData(event) {
+          //  console.log('dins handle');
+            const value = event.target.value;
+        //console.log(value);
+        
+            dada=unpack(value);
+        // console.log(dada);
+            message = new TextDecoder().decode(value);
+        // console.log(message);
+            
+            encoder = new TextEncoder();
+            dada4 = encoder.encode(message); 
+       // console.log(dada4);
+            dada5=unpack(dada4);
+        console.log(dada5);
+            message = new TextDecoder().decode(dada5);
+
+        console.log(message);
+
+           // if((value.getUint8(0) == 0x32)||(value.getUint8(0) == 0x01)) {
+              //const payload = message.substring(3);
+              const payload = message;
+              log("Received: " +payload);
+           // }
+        }
+
+
+        function get_code(){
+
+//codi=`from hub import light_matrix
+//light_matrix.set_pixel(1,1,100)
+//while True:
+//    pass`
+            codi=`from hub import light_matrix
+import motor
+from hub import port
+light_matrix.set_pixel(1,1,100)
+import hub
+tunnel = hub.config['module_tunnel']
+def receive_tunnel_message(data):
+    if data==b"bye.bye.AB":
+        quit()    
+    if True:
+        n=''
+        for i in range(1,5):
+            n=n+chr(data[i])
+        mA=int(n)*10
+        n=''
+        for i in range(6,10):
+            n=n+chr(data[i])
+        mB=int(n)*10
+        if chr(data[0])=='A':
+            motor.run(port.A,mA)
+        elif chr(data[0])=='B':
+            motor.run(port.B,mA)
+        elif chr(data[0])=='C':
+            motor.run(port.C,mA)
+        elif chr(data[0])=='D':
+            motor.run(port.D,mA)
+        elif chr(data[0])=='E':
+            motor.run(port.E,mA)
+        elif chr(data[0])=='F':
+            motor.run(port.F,mA)
+        if chr(data[5])=='A':
+            motor.run(port.A,mB)
+        elif chr(data[5])=='B':
+            motor.run(port.B,mB)
+        elif chr(data[5])=='C':
+            motor.run(port.C,mB)
+        elif chr(data[5])=='D':
+            motor.run(port.D,mB)
+        elif chr(data[5])=='E':
+            motor.run(port.E,mB)
+        elif chr(data[5])=='F':
+            motor.run(port.F,mB)
+    tunnel.send(b'rdy')
+tunnel.callback(receive_tunnel_message)
+tunnel.send(b'rdy')
+while True:   
+    pass`
+
+            return codi
+        }
+        
+        async function sendFileUpload() {        
+         
+            name="program.py\0" 
+            num="\x00";
+
+            encoder = new TextEncoder();
+            codi=encoder.encode(get_code()); 
+            crc=crc32Uint8Array(codi,0,true);
+            crc_2=uint32ToUint8Array(crc);
+            
+            data = encoder.encode("\x0c"); // data = encoder.encode("\x0c"+name+num);
+            name2=encoder.encode(name);
+            data=concatenateUint8Arrays(data,name2);
+            num2=encoder.encode(num);
+            data=concatenateUint8Arrays(data,num2);
+            data=concatenateUint8Arrays(data,crc_2.reverse());
+            data=pack(data);
+            try {
+                await commandCharacteristicRX.writeValue(data);
+                //log("Sent: " + command);
+            } catch (error) {
+                log("Error sending command: " + error);
+            }
+        }
+
+        function uint16ToUint8Array(uint16) {
+          const uint8Array = new Uint8Array(2); // Create a Uint8Array of length 4 (4 bytes)
+          const dataView = new DataView(uint8Array.buffer);
+          dataView.setUint16(0, uint16, true); // Offset 0, value uint32, big-endian (false for little-endian)
+          return uint8Array;
+            }
+        function uint32ToUint8Array(uint32) {
+          const uint8Array = new Uint8Array(4); // Create a Uint8Array of length 4 (4 bytes)
+          const dataView = new DataView(uint8Array.buffer);
+          dataView.setUint32(0, uint32, false); // Offset 0, value uint32, big-endian (false for little-endian)
+          return uint8Array;
+            }
+        function concatenateUint8Arrays(array1, array2) {
+          const result = new Uint8Array(array1.length + array2.length);
+          result.set(array1, 0); // Copy the first array into the result starting at index 0
+          result.set(array2, array1.length); // Copy the second array into the result starting after the first array
+          return result;
+        }
+        
+        async function transferChunk() {            
+
+            encoder = new TextEncoder();  
+
+            part1=get_code();
+            codi=encoder.encode(part1.substring(0,445));            
+            tamany=codi.length;  console.log(tamany);
+            tamany=uint16ToUint8Array(tamany);// console.log(tamany); 
+            crc=crc32Uint8Array(codi,0,true); //console.log(crc);            
+            crc_2=uint32ToUint8Array(crc); //console.log(crc_2);
+           // data = encoder.encode("\x10"+crc_3+tamany+codi);
+            data=concatenateUint8Arrays(encoder.encode("\x10"), crc_2.reverse());
+            data=concatenateUint8Arrays(data,tamany);
+            data=concatenateUint8Arrays(data,codi);
+            //console.log(data);
+            data=pack(data);
+            try { 
+                await commandCharacteristicRX.writeValue(data);
+            } catch (error) {log("Error sending command: " + error);}
+
+            part2=get_code();
+            codi=encoder.encode(part2.substring(445,890));            
+            tamany=codi.length;  console.log(tamany);
+            tamany=uint16ToUint8Array(tamany); 
+            crc=crc32Uint8Array(codi,crc,true);            
+            crc_2=uint32ToUint8Array(crc); 
+            data=concatenateUint8Arrays(encoder.encode("\x10"), crc_2.reverse());
+            data=concatenateUint8Arrays(data,tamany);
+            data=concatenateUint8Arrays(data,codi);
+            data=pack(data);
+            try {
+                await commandCharacteristicRX.writeValue(data);
+            } catch (error) {log("Error sending command: " + error);}
+
+            part3=get_code();
+            codi=encoder.encode(part3.substring(890));            
+            tamany=codi.length;  console.log(tamany);
+            tamany=uint16ToUint8Array(tamany); 
+            crc=crc32Uint8Array(codi,crc,true);            
+            crc_2=uint32ToUint8Array(crc); 
+            data=concatenateUint8Arrays(encoder.encode("\x10"), crc_2.reverse());
+            data=concatenateUint8Arrays(data,tamany);
+            data=concatenateUint8Arrays(data,codi);
+            data=pack(data);
+            try {
+                await commandCharacteristicRX.writeValue(data);
+            } catch (error) {log("Error sending command: " + error);}
+
+            
+
+            
+        }
+
+        async function clear() {
+            const encoder = new TextEncoder();
+            data = encoder.encode("\x46\x00");  // start program 0
+            data2=pack(data);
+            try {
+                await commandCharacteristicRX.writeValue(data2);
+                //log("Sent: " + command);
+            } catch (error) {
+                log("Error sending command: " + error);
+            }
+        }
+
+        async function program_noti() {
+            const encoder = new TextEncoder();
+            data = encoder.encode("\x00");  // start program 0
+            data2=pack(data);
+            try {
+                await commandCharacteristicRX.writeValue(data2);
+                //log("Sent: " + command);
+            } catch (error) {
+                log("Error sending command: " + error);
+            }
+        }
+        
+        async function sendCommandStart() {
+            const encoder = new TextEncoder();
+            data = encoder.encode("\x1e\x00\x00");  // start program 0
+            data2=pack(data);
+            try {
+                await commandCharacteristicRX.writeValue(data2);
+                //log("Sent: " + command);
+            } catch (error) {
+                log("Error sending command: " + error);
+            }
+        }
+
+        async function sendCommand(command) {
+            const encoder = new TextEncoder();
+            data = encoder.encode("\x32\x0a\x00"+command);
+            data2=pack(data);
+
+            try {
+                await commandCharacteristicRX.writeValue(data2);
+                log("Sent: " + command);
+
+                if(command != "bye.bye.AB") {
+                  await waitForReady(); // wait for "rdy" after sending command, except "bye"
+                }
+
+            } catch (error) {
+                log("Error sending command: " + error);
+            }
+        }
+
+        async function waitForReady() {
+          return new Promise(resolve => {
+            function dataListener(event) {
+
+                console.log('dins waiting...')
+              const value = event.target.value;
+
+            dada=unpack(value);
+            message = new TextDecoder().decode(value);
+
+            encoder = new TextEncoder();
+            dada4 = encoder.encode(message.substring(0)); 
+            dada5=unpack(dada4);
+            message = new TextDecoder().decode(dada5);
+
+            console.log(message);
+
+              //if (value.getUint8(0) == 0x32 && message.substring(3) === "rdy") {
+              if (true){  
+                  commandCharacteristicTX.removeEventListener('characteristicvaluechanged', dataListener);
+                  log("Received rdy signal:"+message);
+                  //console.log(dada);
+                  resolve();
+              }
+            }
+            commandCharacteristicTX.addEventListener('characteristicvaluechanged', dataListener);
+          });
+        }
+
+        function delay(ms) {
+            return new Promise(resolve => setTimeout(resolve, ms));
+        }
+
+
+
+//--------------------------------------------------------------------------------------------
+function crc32Uint8Array(data, seed, littleEndian = true) {
+
+  // Function to reverse byte order within a 32-bit word (for endianness conversion)
+  function reverseBytes(word) {
+    return (((word & 0xff) << 24) |
+      ((word & 0xff00) << 8) |
+      ((word & 0xff0000) >>> 8) |
+      ((word & 0xff000000) >>> 24)) >>> 0;
+  }
+
+  let initialCrc = seed === undefined ? 0 ^ (-1) : seed ^ (-1);
+
+  if (!littleEndian && seed !== undefined) {
+    initialCrc = reverseBytes(initialCrc); // Adjust initial CRC for big-endian
+  }
+  let crc = initialCrc;
+
+  const align = 4;
+  const remainder = data.length % align;
+  let alignedData = data;
+
+  if (remainder) {
+    const paddingLength = align - remainder;
+    const paddedArray = new Uint8Array(data.length + paddingLength);
+    paddedArray.set(data, 0);
+    for (let i = 0; i < paddingLength; i++) {
+      paddedArray[data.length + i] = 0;
+    }
+    alignedData = paddedArray;
+  }
+
+  const table = new Uint32Array(256);
+
+  // Generate lookup table according to endianness
+  for (let n = 0; n < 256; n++) {
+    let c = n;
+    if (!littleEndian) {
+      c = reverseBytes(c); // Reverse for Big Endian table
+    }
+    for (let k = 0; k < 8; k++) {
+      c = ((c & 1) ? (0xEDB88320 ^ (c >>> 1)) : (c >>> 1)) >>> 0;
+    }
+    if (!littleEndian) {
+      c = reverseBytes(c); // Reverse back for storing
+    }
+    table[n] = c >>> 0;
+  }
+
+  for (let i = 0; i < alignedData.length; i++) {
+    const byte = alignedData[i];
+
+    if (littleEndian) {
+      crc = (crc >>> 8) ^ table[(crc ^ byte) & 0xFF];
+    }
+    else {
+      crc = (crc >>> 8) ^ table[((crc) & 0xFF) ^ byte];
+    }
+  }
+
+  crc = (crc ^ (-1)) >>> 0;
+
+
+  return crc;
+}
+
+
+function crc32String(data, seed, littleEndian = true) {
+
+  // Function to reverse byte order within a 32-bit word (for endianness conversion)
+  function reverseBytes(word) {
+    return (((word & 0xff) << 24) |
+      ((word & 0xff00) << 8) |
+      ((word & 0xff0000) >>> 8) |
+      ((word & 0xff000000) >>> 24)) >>> 0;
+  }
+
+  let initialCrc = seed === undefined ? 0 ^ (-1) : seed ^ (-1);
+
+  if (!littleEndian && seed !== undefined) {
+    initialCrc = reverseBytes(initialCrc); // Adjust initial CRC for big-endian
+  }
+  let crc = initialCrc;
+
+  const align = 4;
+  const remainder = data.length % align;
+  let alignedData = data;
+
+  if (remainder) {
+    const paddingLength = align - remainder;
+    let padding = "";
+    for (let i = 0; i < paddingLength; i++) {
+      padding += "\x00"; // Null character
+    }
+    alignedData = data + padding;  // Concatenate strings
+  }
+
+  const table = new Uint32Array(256);
+
+  // Generate lookup table according to endianness
+  for (let n = 0; n < 256; n++) {
+    let c = n;
+    if (!littleEndian) {
+      c = reverseBytes(c); // Reverse for Big Endian table
+    }
+    for (let k = 0; k < 8; k++) {
+      c = ((c & 1) ? (0xEDB88320 ^ (c >>> 1)) : (c >>> 1)) >>> 0;
+    }
+    if (!littleEndian) {
+      c = reverseBytes(c); // Reverse back for storing
+    }
+    table[n] = c >>> 0;
+  }
+
+  for (let i = 0; i < alignedData.length; i++) {
+    const charCode = alignedData.charCodeAt(i); // Get character code
+    if (charCode > 255) {
+        console.warn("Character code > 255.  Results may be incorrect for non-ASCII characters.");
+    }
+
+    const byte = charCode & 0xFF; // Truncate to 8 bits
+
+    if (littleEndian) {
+      crc = (crc >>> 8) ^ table[(crc ^ byte) & 0xFF];
+    }
+    else {
+      crc = (crc >>> 8) ^ table[((crc) & 0xFF) ^ byte];
+    }
+  }
+
+  crc = (crc ^ (-1)) >>> 0;
+
+
+  return crc;
+}
+
+//---------------------------------------------------------------------------------------------------
+    </script>
+</body>
+</html>
