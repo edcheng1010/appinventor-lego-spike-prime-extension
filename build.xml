@@ -60,6 +60,15 @@
 
     <echo>Syncing sources → ${ai2.ext.src.dir}</echo>
 
+    <!--
+      Delete all .java files currently in the AI2 directory before copying.
+      This ensures that files deleted from our project are not left behind
+      in the AI2 tree (where they would cause build errors on the next run).
+    -->
+    <delete>
+      <fileset dir="${ai2.ext.src.dir}" includes="*.java"/>
+    </delete>
+
     <!-- Protocol helper package: io.github.appinventor.legospike -->
     <copy todir="${ai2.ext.src.dir}" overwrite="true">
       <fileset dir="${src.dir}/io/github/appinventor/legospike"
