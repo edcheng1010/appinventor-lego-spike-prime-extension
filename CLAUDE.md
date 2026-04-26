@@ -39,6 +39,25 @@ This is an MIT App Inventor extension for LEGO SPIKE Prime hubs, developed for t
    - Pack: data -> COBS encode -> XOR each byte with 0x03 -> append delimiter 0x02
    - Unpack: strip delimiter -> XOR each byte with 0x03 -> COBS decode
 
+7. **ALWAYS use exact parameter types when calling BluetoothLE methods via reflection.**
+   - Reflection requires parameter types to match the declared signature exactly.
+   - `RegisterForBytes` takes 3 params: `(String, String, boolean)` — not 2.
+   - `WriteBytes` 4th param is `Object.class`, not `YailList.class`.
+   - Before adding or changing any `getMethod(...)` call, verify the signature against
+     `BluetoothLE.java` source (in the AI2 tree at
+     `appinventor/components/src/edu/mit/appinventor/ble/BluetoothLE.java`).
+
+8. **NEVER assume BluetoothLE events call methods on this extension.**
+   - `EventDispatcher.dispatchEvent(bleComponent, "Connected")` fires only to App Inventor
+     block handlers. It does NOT call Java methods on other extensions.
+   - Connection state MUST be tracked via a `BluetoothConnectionListener` dynamic proxy
+     registered through `addConnectionListener()` — see ARCHITECTURE.md Section 5.
+   - Byte reception and ConnectionFailed require user-wired blocks in App Inventor:
+       `BluetoothLE1.BytesReceived → LegoSpikePrime1.OnBytesReceivedFromHub`
+       `BluetoothLE1.ConnectionFailed → LegoSpikePrime1.OnConnectionFailed`
+   - Any method named `BluetoothLE_*` that is not called from a user block or a registered
+     listener is dead code and must be removed.
+
 ## Codebase Structure (The "Split")
 
 There are two packages in this repository:

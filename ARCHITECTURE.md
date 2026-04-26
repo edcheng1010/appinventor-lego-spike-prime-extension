@@ -120,7 +120,83 @@ Key hub-side API:
 
 **Rule for Claude Code:** Before implementing any motor/LED/sensor control, you MUST use the TunnelMessage approach. Direct BLE commands for hardware control do NOT work on SPIKE Prime 3.x.
 
-## 5. Future Extensibility Strategy
+## 5. BLE Connection Mechanism (Critical — Discovered April 2026)
+
+This section documents how the extension actually communicates with the BluetoothLE component
+and why the original approach was entirely broken.
+
+### 5.1 BluetoothLE is a Separate Extension, Not a Built-in
+
+The `edu.mit.appinventor.ble.BluetoothLE` component is a separately distributed `.aix` extension,
+not part of the App Inventor runtime. Our extension cannot import its classes at compile time.
+All interaction must use Java reflection.
+
+### 5.2 Why `BluetoothLE_*` Methods Were Dead Code
+
+The original code contained public methods like `BluetoothLE_Connected(String address)`,
+`BluetoothLE_Disconnected()`, and `BluetoothLE_DeviceFound(String, String, int)`.
+These were **never called** and never could be, because:
+
+- `EventDispatcher.dispatchEvent(bleComponent, "Connected")` fires events **only to App Inventor
+  block handlers registered on the BluetoothLE component itself**. It does not call methods on
+  other extensions.
+- The BLE `Connected` event also has **0 parameters** — the dead `BluetoothLE_Connected(String)`
+  had the wrong signature anyway.
+- There is no mechanism in App Inventor for one extension to automatically intercept another
+  extension's events.
+
+**Consequence:** `isConnected` never became `true`, `HubConnected` never fired. This bug existed
+across all 17 original Manus development sessions.
+
+### 5.3 The Fix: Java Dynamic Proxy as BluetoothConnectionListener
+
+`BluetoothLE.java` exposes a `BluetoothConnectionListener` interface and
+`addConnectionListener(listener)` / `removeConnectionListener(listener)` methods.
+When GATT connection + service discovery complete, `BluetoothLEint.java` calls
+`listener.onConnected(bleInstance)` on every registered listener — this IS a direct Java call,
+not EventDispatcher.
+
+Since we cannot import `BluetoothConnectionListener` at compile time, we create it at runtime
+using `java.lang.reflect.Proxy`:
+
+```java
+Class<?> iface = ble.getClass().getClassLoader()
+    .loadClass("edu.mit.appinventor.ble.BluetoothLE$BluetoothConnectionListener");
+Object proxy = Proxy.newProxyInstance(ble.getClass().getClassLoader(),
+    new Class<?>[]{ iface },
+    (p, method, args) -> {
+        if ("onConnected".equals(method.getName()))   handleBleConnected(args[0]);
+        if ("onDisconnected".equals(method.getName())) handleBleDisconnected();
+        return null;
+    });
+ble.getClass().getMethod("addConnectionListener", iface).invoke(ble, proxy);
+```
+
+This proxy is registered in the `BluetoothDevice(Component ble)` property setter and removed
+when the BLE component changes.
+
+### 5.4 Connection Polling Fallback
+
+As a safety net against older BLE extension builds or proxy registration failures, a
+`Timer connectionPollTimer` checks `IsDeviceConnected()` every 500 ms for up to 10 seconds
+after `ConnectWithAddress` is called. If it returns `true` while `isConnected` is `false`,
+`onConnected()` is called directly. The guard `if (isConnected) return` in `onConnected()`
+prevents double-firing if both mechanisms trigger.
+
+### 5.5 User-Wired Block Requirements
+
+Two events from BluetoothLE **cannot** be intercepted automatically and **must** be wired in
+App Inventor blocks by the user:
+
+| BluetoothLE event | Wire to | Effect |
+|---|---|---|
+| `BluetoothLE1.BytesReceived(serviceUuid, charUuid, byteValues)` | `LegoSpikePrime1.OnBytesReceivedFromHub(serviceUuid, charUuid, byteValues)` | Feeds incoming BLE bytes into the SPIKE Prime frame buffer |
+| `BluetoothLE1.ConnectionFailed(reason)` | `LegoSpikePrime1.OnConnectionFailed(reason)` | Stops polling immediately; resumes scanning; fires ErrorOccurred |
+
+Without the `BytesReceived` wiring, no data from the hub (InfoResponse, rdy, TunnelMessage)
+will ever be received.
+
+## 6. Future Extensibility Strategy
 To support older/legacy LEGO robotics products in the future:
 1. The `BluetoothInterfaceImpl` should be abstracted into an interface (`ILegoBluetooth`).
 2. Create specific implementations (e.g., `SpikePrimeBluetoothImpl`, `Ev3BluetoothImpl`).

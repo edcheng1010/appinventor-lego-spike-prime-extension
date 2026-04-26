@@ -19,6 +19,8 @@ import com.google.appinventor.components.runtime.ComponentContainer;
 import com.google.appinventor.components.runtime.EventDispatcher;
 import com.google.appinventor.components.runtime.util.YailList;
 
+import java.lang.reflect.InvocationHandler;
+import java.lang.reflect.Proxy;
 import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.HashSet;
@@ -112,10 +114,10 @@ public class LegoSpikePrime extends AndroidNonvisibleComponent {
     private Component bluetoothLE;
     private BluetoothInterfaceImpl bluetoothInterface;
 
-    private boolean isConnected   = false;
-    private boolean isScanning    = false;
+    private volatile boolean isConnected   = false;
+    private volatile boolean isScanning    = false;
     // CLAUDE.md Rule 4: must stop scanning before connecting; resume on failure/disconnect.
-    private boolean wasScanningBeforeConnection = false;
+    private volatile boolean wasScanningBeforeConnection = false;
 
     private String connectedDeviceAddress = "";
     private String connectedDeviceName    = "";
@@ -125,6 +127,19 @@ public class LegoSpikePrime extends AndroidNonvisibleComponent {
     // Effective max chunk size for program upload; updated when InfoResponse arrives.
     // 445 is the value etomasfe hard-codes when skipping InfoRequest.
     private int maxChunkSize  = 445;
+
+    // Dynamic proxy registered with BluetoothLE as a BluetoothConnectionListener.
+    private Object connectionListenerProxy = null;
+
+    // BLE address we are in the process of connecting to (set in ConnectToHub,
+    // cleared after connection succeeds or fails).
+    private volatile String pendingConnectAddress = "";
+
+    // Polling fallback: detects connection via IsDeviceConnected() if the dynamic
+    // proxy listener fails (e.g., older BLE extension build).
+    private Timer   connectionPollTimer             = null;
+    private static final int CONNECTION_POLL_INTERVAL_MS = 500;
+    private static final int CONNECTION_POLL_TIMEOUT_MS  = 10000;
 
     // =========================================================================
     // Receive buffer for incoming TX characteristic notifications.
@@ -229,9 +244,57 @@ public class LegoSpikePrime extends AndroidNonvisibleComponent {
     @DesignerProperty(editorType = PropertyTypeConstants.PROPERTY_TYPE_COMPONENT
         + ":edu.mit.appinventor.ble.BluetoothLE")
     public void BluetoothDevice(Component ble) {
+        // Remove the old proxy listener before switching the BLE component
+        if (this.bluetoothLE != null && connectionListenerProxy != null) {
+            try {
+                Class<?> iface = this.bluetoothLE.getClass().getClassLoader()
+                    .loadClass("edu.mit.appinventor.ble.BluetoothLE$BluetoothConnectionListener");
+                this.bluetoothLE.getClass()
+                    .getMethod("removeConnectionListener", iface)
+                    .invoke(this.bluetoothLE, connectionListenerProxy);
+            } catch (Exception e) {
+                logDebug("removeConnectionListener: " + e.getMessage());
+            }
+            connectionListenerProxy = null;
+        }
+
         this.bluetoothLE = ble;
         bluetoothInterface.setBluetoothLE(ble);
         logDebug("BluetoothLE component set");
+
+        if (ble == null) return;
+
+        // Register a dynamic proxy that implements BluetoothConnectionListener.
+        // This is the primary mechanism for detecting connection / disconnection.
+        // (BluetoothLE.java: addConnectionListener / BluetoothLEint.java: fires onConnected)
+        try {
+            Class<?> iface = ble.getClass().getClassLoader()
+                .loadClass("edu.mit.appinventor.ble.BluetoothLE$BluetoothConnectionListener");
+            connectionListenerProxy = Proxy.newProxyInstance(
+                ble.getClass().getClassLoader(),
+                new Class<?>[]{ iface },
+                new InvocationHandler() {
+                    @Override
+                    public Object invoke(Object proxy,
+                                         java.lang.reflect.Method method,
+                                         Object[] args) {
+                        String mn = method.getName();
+                        if ("onConnected".equals(mn)) {
+                            handleBleConnected(args != null && args.length > 0 ? args[0] : null);
+                        } else if ("onDisconnected".equals(mn)) {
+                            handleBleDisconnected();
+                        }
+                        return null;
+                    }
+                });
+            ble.getClass()
+                .getMethod("addConnectionListener", iface)
+                .invoke(ble, connectionListenerProxy);
+            logDebug("BluetoothConnectionListener proxy registered");
+        } catch (Exception e) {
+            logDebug("Could not register connection listener: " + e.getMessage());
+            // Connection polling fallback (started in ConnectToHub) will still detect connection.
+        }
     }
 
     @SimpleProperty(category = PropertyCategory.BEHAVIOR,
@@ -531,6 +594,12 @@ public class LegoSpikePrime extends AndroidNonvisibleComponent {
         // CLAUDE.md Rule 4: stop scanning before connecting, remember to resume.
         if (isScanning) {
             wasScanningBeforeConnection = true;
+            // Bug 2 fix: also stop the BLE adapter itself, not just our timer
+            try {
+                bluetoothLE.getClass().getMethod("StopScanning").invoke(bluetoothLE);
+            } catch (Exception e) {
+                logDebug("BLE StopScanning: " + e.getMessage());
+            }
             stopScanTimer();
             isScanning = false;
             ScanningStopped();
@@ -539,14 +608,18 @@ public class LegoSpikePrime extends AndroidNonvisibleComponent {
         }
 
         LegoHub hub = visible.get(index - 1);
+        pendingConnectAddress = hub.getAddress();
         logDebug("ConnectToHub → " + hub);
         try {
             bluetoothLE.getClass()
                 .getMethod("ConnectWithAddress", String.class)
                 .invoke(bluetoothLE, hub.getAddress());
+            // Bug 5: start polling fallback in case the proxy listener misses the callback
+            startConnectionPolling(hub.getName(), hub.getAddress());
             return true;
         } catch (Exception e) {
             ErrorOccurred("Connect failed: " + e.getMessage());
+            pendingConnectAddress = "";
             if (wasScanningBeforeConnection) {
                 isScanning = true; startScanTimer(); ScanningStarted();
             }
@@ -557,6 +630,8 @@ public class LegoSpikePrime extends AndroidNonvisibleComponent {
     /** Disconnect from the currently connected hub. */
     @SimpleFunction(description = "Disconnect from the currently connected hub")
     public void Disconnect() {
+        stopConnectionPolling();
+        pendingConnectAddress = "";
         if (!isConnected || bluetoothLE == null) return;
         logDebug("Disconnect → " + connectedDeviceName);
         try {
@@ -564,6 +639,32 @@ public class LegoSpikePrime extends AndroidNonvisibleComponent {
         } catch (Exception e) {
             ErrorOccurred("Disconnect failed: " + e.getMessage());
         }
+    }
+
+    /**
+     * Call this from App Inventor blocks when BluetoothLE.ConnectionFailed fires.
+     * Stops connection polling immediately (no need to wait for the 10-second timeout),
+     * resumes scanning if scanning was active before the connect attempt, and fires
+     * ErrorOccurred with the reason supplied by the BLE component.
+     *
+     * Wiring: when BluetoothLE.ConnectionFailed(reason) → call LegoSpikePrime.OnConnectionFailed(reason)
+     *
+     * @param reason human-readable failure reason from the BluetoothLE component
+     */
+    @SimpleFunction(description =
+        "Wire BluetoothLE.ConnectionFailed to this method. "
+        + "Stops polling, resumes scanning, and fires ErrorOccurred with the failure reason.")
+    public void OnConnectionFailed(String reason) {
+        logDebug("OnConnectionFailed: " + reason);
+        stopConnectionPolling();
+        pendingConnectAddress = "";
+        if (wasScanningBeforeConnection) {
+            wasScanningBeforeConnection = false;
+            isScanning = true;
+            startScanTimer();
+            ScanningStarted();
+        }
+        ErrorOccurred("Connection failed: " + (reason != null ? reason : "unknown"));
     }
 
     /**
@@ -576,8 +677,8 @@ public class LegoSpikePrime extends AndroidNonvisibleComponent {
         logDebug("Subscribing to TX notifications: " + TX_CHAR_UUID);
         try {
             bluetoothLE.getClass()
-                .getMethod("RegisterForBytes", String.class, String.class)
-                .invoke(bluetoothLE, SPIKE_SERVICE_UUID, TX_CHAR_UUID);
+                .getMethod("RegisterForBytes", String.class, String.class, boolean.class)
+                .invoke(bluetoothLE, SPIKE_SERVICE_UUID, TX_CHAR_UUID, false);
             logDebug("TX notification subscription OK");
         } catch (Exception e) {
             logDebug("RegisterForBytes failed: " + e.getMessage());
@@ -605,7 +706,7 @@ public class LegoSpikePrime extends AndroidNonvisibleComponent {
         try {
             java.lang.reflect.Method writeBytes =
                 bluetoothLE.getClass().getMethod(
-                    "WriteBytes", String.class, String.class, boolean.class, YailList.class);
+                    "WriteBytes", String.class, String.class, boolean.class, Object.class);
 
             for (int offset = 0; offset < framedMessage.length; offset += maxPacketSize) {
                 int end = Math.min(offset + maxPacketSize, framedMessage.length);
@@ -771,86 +872,127 @@ public class LegoSpikePrime extends AndroidNonvisibleComponent {
     }
 
     // =========================================================================
-    // BLE event callbacks (called by App Inventor event dispatch or by user blocks)
+    // Connection callbacks — fired by the dynamic proxy BluetoothConnectionListener
     // =========================================================================
 
-    /** BluetoothLE DeviceFound callback — update hub list, fire HubFound. */
-    public void BluetoothLE_DeviceFound(String name, String address, int rssi) {
-        // CLAUDE.md Rule 3: null-check address before any list access
-        if (address == null) return;
-        logDebug("DeviceFound: " + name + " (" + address + ") rssi=" + rssi);
-        if (!isLegoSpikeHub(name)) return;
+    /**
+     * Called by the dynamic proxy when BluetoothLE fires onConnected.
+     * Extracts device name from the BLE component, falls back to our hub list.
+     * Runs on the BLE callback thread — marshals to main thread via onConnected().
+     */
+    private void handleBleConnected(Object bleInstance) {
+        stopConnectionPolling();
+        if (isConnected) return; // guard: proxy + polling could both fire
 
-        boolean found = false;
-        for (LegoHub h : legoHubs) {
-            if (address.equals(h.getAddress())) { h.updateLastSeen(); found = true; break; }
-        }
-        if (!found) {
-            LegoHub hub = new LegoHub(name != null ? name : "SPIKE Hub", address, -1);
-            legoHubs.add(hub);
-            final String n = hub.getName(), a = address;
-            mainHandler.post(() -> HubFound(n, a));
-        }
-    }
-
-    public void BluetoothLE_ScanningStateChanged(boolean scanning) {
-        isScanning = scanning;
-        if (scanning) ScanningStarted(); else ScanningStopped();
-    }
-
-    /** BluetoothLE Connected callback — sets state and subscribes to TX. */
-    public void BluetoothLE_Connected(String address) {
-        // CLAUDE.md Rule 3: null-check address
-        if (address == null) { logDebug("BluetoothLE_Connected: null address, ignoring"); return; }
-        logDebug("BluetoothLE_Connected: " + address);
-
+        // Try to read the device name from the BluetoothLE component
         String name = "SPIKE Hub";
-        for (LegoHub h : legoHubs) {
-            if (address.equals(h.getAddress())) { name = h.getName(); break; }
+        if (bleInstance != null) {
+            try {
+                String n = (String) bleInstance.getClass()
+                    .getMethod("ConnectedDeviceName").invoke(bleInstance);
+                // "NEEDS_PERMISSION" is returned if Bluetooth Connect permission not granted yet
+                if (n != null && !n.isEmpty() && !"NEEDS_PERMISSION".equals(n)) {
+                    name = n;
+                }
+            } catch (Exception e) {
+                logDebug("ConnectedDeviceName: " + e.getMessage());
+            }
         }
-        onConnected(name, address);
+        // Fall back to the name from our discovered hub list
+        if ("SPIKE Hub".equals(name) && !pendingConnectAddress.isEmpty()) {
+            for (LegoHub h : legoHubs) {
+                if (pendingConnectAddress.equals(h.getAddress())) { name = h.getName(); break; }
+            }
+        }
+
+        final String finalName = name;
+        final String finalAddr = pendingConnectAddress;
+        mainHandler.post(() -> onConnected(finalName, finalAddr));
     }
 
-    public void BluetoothLE_Disconnected() {
-        logDebug("BluetoothLE_Disconnected");
-        onDisconnected();
+    /** Called by the dynamic proxy when BluetoothLE fires onDisconnected. */
+    private void handleBleDisconnected() {
+        stopConnectionPolling();
+        mainHandler.post(() -> onDisconnected());
+    }
+
+    // =========================================================================
+    // Connection polling fallback (Bug 5)
+    // Detects connection via IsDeviceConnected() if the proxy callback does not fire.
+    // =========================================================================
+
+    private void startConnectionPolling(final String targetName, final String targetAddress) {
+        stopConnectionPolling();
+        final long startTime = System.currentTimeMillis();
+        connectionPollTimer = new Timer("LegoConnPoll", true /*daemon*/);
+        connectionPollTimer.scheduleAtFixedRate(new TimerTask() {
+            @Override public void run() {
+                if (isConnected) { stopConnectionPolling(); return; }
+                if (System.currentTimeMillis() - startTime > CONNECTION_POLL_TIMEOUT_MS) {
+                    stopConnectionPolling();
+                    mainHandler.post(() -> ErrorOccurred("Connection timeout"));
+                    if (wasScanningBeforeConnection) {
+                        wasScanningBeforeConnection = false;
+                        mainHandler.post(() -> { isScanning = true; startScanTimer(); ScanningStarted(); });
+                    }
+                    return;
+                }
+                try {
+                    boolean bleConn = (Boolean) bluetoothLE.getClass()
+                        .getMethod("IsDeviceConnected").invoke(bluetoothLE);
+                    if (bleConn && !isConnected) {
+                        logDebug("Connection detected by polling fallback");
+                        stopConnectionPolling();
+                        mainHandler.post(() -> onConnected(targetName, targetAddress));
+                    }
+                } catch (Exception e) {
+                    logDebug("Connection poll: " + e.getMessage());
+                }
+            }
+        }, CONNECTION_POLL_INTERVAL_MS, CONNECTION_POLL_INTERVAL_MS);
+    }
+
+    private void stopConnectionPolling() {
+        if (connectionPollTimer != null) {
+            connectionPollTimer.cancel();
+            connectionPollTimer = null;
+        }
     }
 
     // =========================================================================
     // Connection state transitions
     // =========================================================================
 
-    /** Called after GATT connection is established. Subscribes to TX characteristic. */
+    /** Called once GATT is up. Subscribes to TX, sends InfoRequest, fires HubConnected. */
     public void onConnected(String deviceName, String deviceAddress) {
-        isConnected           = true;
-        connectedDeviceName   = deviceName;
+        if (isConnected) return; // guard against double-calls (proxy + polling)
+        stopConnectionPolling();
+
+        isConnected            = true;
+        connectedDeviceName    = deviceName;
         connectedDeviceAddress = deviceAddress;
-        receiveBuffer.clear(); // discard stale bytes from any previous session
+        pendingConnectAddress  = "";
+        receiveBuffer.clear();
 
         logDebug("onConnected: " + deviceName + " (" + deviceAddress + ")");
 
-        // Subscribe to hub's TX characteristic so we receive notifications
         registerForTXNotifications();
 
-        // InfoRequest handshake — must be the first message sent after subscribing to TX
-        // so the hub's InfoResponse arrives and populates maxPacketSize / maxChunkSize.
         logDebug("Sending InfoRequest");
         sendFramedMessage(MessageFramer.pack(MessageBuilder.buildInfoRequest()));
 
-        // Fire events on main thread
         final String n = deviceName, a = deviceAddress;
-        mainHandler.post(() -> {
-            Connected(n, a);
-            HubConnected(n, a); // legacy alias kept for existing block users
-        });
+        mainHandler.post(() -> HubConnected(n, a));
     }
 
-    /** Called after GATT connection is lost. */
+    /** Called when the GATT connection is lost. */
     public void onDisconnected() {
+        stopConnectionPolling();
         isConnected = false;
-        final String n = connectedDeviceName, a = connectedDeviceAddress;
+        final String n = connectedDeviceName;
         connectedDeviceName    = "";
         connectedDeviceAddress = "";
+        pendingConnectAddress  = "";
         receiveBuffer.clear();
         logDebug("onDisconnected: " + n);
 
@@ -862,10 +1004,7 @@ public class LegoSpikePrime extends AndroidNonvisibleComponent {
             ScanningStarted();
         }
 
-        mainHandler.post(() -> {
-            Disconnected();
-            HubDisconnected(); // legacy alias
-        });
+        mainHandler.post(() -> HubDisconnected());
     }
 
     // =========================================================================
@@ -912,30 +1051,18 @@ public class LegoSpikePrime extends AndroidNonvisibleComponent {
      * Fired when successfully connected to a SPIKE Prime hub.
      *
      * @param deviceName    hub BLE name
-     * @param deviceAddress hub BLE address
+     * @param deviceAddress hub BLE MAC address
      */
     @SimpleEvent(description = "Fired when the app connects to a SPIKE Prime hub")
-    public void Connected(String deviceName, String deviceAddress) {
-        logDebug("Connected: " + deviceName);
-        EventDispatcher.dispatchEvent(this, "Connected", deviceName, deviceAddress);
+    public void HubConnected(String deviceName, String deviceAddress) {
+        logDebug("HubConnected: " + deviceName + " (" + deviceAddress + ")");
+        EventDispatcher.dispatchEvent(this, "HubConnected", deviceName, deviceAddress);
     }
 
     /** Fired when the connection to the hub is lost. */
     @SimpleEvent(description = "Fired when the connection to the hub is lost")
-    public void Disconnected() {
-        logDebug("Disconnected");
-        EventDispatcher.dispatchEvent(this, "Disconnected");
-    }
-
-    /** Legacy alias for Connected — kept so existing block users are not broken. */
-    @SimpleEvent(description = "Fired when the app connects to a hub (legacy name)")
-    public void HubConnected(String deviceName, String deviceAddress) {
-        EventDispatcher.dispatchEvent(this, "HubConnected", deviceName, deviceAddress);
-    }
-
-    /** Legacy alias for Disconnected — kept so existing block users are not broken. */
-    @SimpleEvent(description = "Fired when the connection is lost (legacy name)")
     public void HubDisconnected() {
+        logDebug("HubDisconnected");
         EventDispatcher.dispatchEvent(this, "HubDisconnected");
     }
 
