@@ -4,10 +4,6 @@ import android.os.Handler;
 import android.os.Looper;
 import android.util.Log;
 
-import java.util.Iterator;
-import java.util.Set;
-import java.util.HashSet;
-
 import com.google.appinventor.components.annotations.DesignerComponent;
 import com.google.appinventor.components.annotations.DesignerProperty;
 import com.google.appinventor.components.annotations.PropertyCategory;
@@ -25,1541 +21,910 @@ import com.google.appinventor.components.runtime.util.YailList;
 
 import java.util.ArrayList;
 import java.util.Arrays;
-import java.util.HashMap;
 import java.util.HashSet;
+import java.util.Iterator;
 import java.util.List;
-import java.util.Map;
 import java.util.Set;
 import java.util.Timer;
 import java.util.TimerTask;
 
+import io.github.appinventor.legospike.MessageFramer;
+
 /**
- * LegoSpikePrime extension for MIT App Inventor
- * 
- * This extension provides functionality for discovering and connecting to LEGO SPIKE Prime hubs
- * using the App Inventor BluetoothLE component's index-based device access model.
- * This version uses RSSI staleness detection to hide cached devices without blacklisting.
+ * LegoSpikePrime — MIT App Inventor extension for LEGO SPIKE Prime hubs.
+ *
+ * Communicates over BLE using the SPIKE Prime 3.x fd02 service UUID.
+ * All outbound data goes through the COBS/XOR framing pipeline
+ * (MessageFramer.pack) before being written to the RX characteristic.
+ * Inbound data from the TX characteristic is accumulated in a byte buffer
+ * and dispatched as complete frames (0x01 … 0x02) via MessageFramer.unpack.
  */
 @SimpleObject(external = true)
 @DesignerComponent(version = 1,
-    description = "Extension for communicating with LEGO SPIKE Prime hubs",
+    description = "Extension for communicating with LEGO SPIKE Prime hubs via BLE",
     category = ComponentCategory.EXTENSION,
     nonVisible = true,
     iconName = "aiwebres/legospike.png")
 public class LegoSpikePrime extends AndroidNonvisibleComponent {
 
     private static final String LOG_TAG = "LegoSpikePrime";
-    
-    // BluetoothLE component reference
+
+    // =========================================================================
+    // SPIKE Prime 3.x BLE UUIDs  —  DO NOT CHANGE (CLAUDE.md Rule 1)
+    // These are specific to SPIKE Prime 3.x firmware and MUST NOT be replaced
+    // with the generic LEGO Wireless Protocol UUIDs (00001623...).
+    // =========================================================================
+    public static final String SPIKE_SERVICE_UUID = "0000fd02-0000-1000-8000-00805f9b34fb";
+    public static final String RX_CHAR_UUID       = "0000fd02-0001-1000-8000-00805f9b34fb";
+    public static final String TX_CHAR_UUID       = "0000fd02-0002-1000-8000-00805f9b34fb";
+
+    // Default max packet size used until InfoResponse provides the real value.
+    // 512 bytes covers the maximum BLE ATT MTU; will be replaced by InfoResponse.
+    private static final int DEFAULT_MAX_PACKET_SIZE = 512;
+
+    // =========================================================================
+    // State
+    // =========================================================================
     private Component bluetoothLE;
-    
-    // BluetoothInterface for handling connection and communication
     private BluetoothInterfaceImpl bluetoothInterface;
-    
-    // Properties
-    private boolean debugMode = true;
-    private boolean isConnected = false;
+
+    private boolean isConnected   = false;
+    private boolean isScanning    = false;
+    // CLAUDE.md Rule 4: must stop scanning before connecting; resume on failure/disconnect.
+    private boolean wasScanningBeforeConnection = false;
+
     private String connectedDeviceAddress = "";
-    private String connectedDeviceName = "";
-    private String customDeviceName = "LEGO Hub"; // Default value
-    private boolean isScanning = false; // Track scanning state
-    private boolean wasScanningBeforeConnection = false; // Track if we should restart scanning
-    private int scanInterval = 1000; // Scan interval in milliseconds (1 second)
-    private Timer scanTimer; // Timer for real-time scanning
-    
-    // Handler for main thread event dispatching
+    private String connectedDeviceName    = "";
+
+    // Effective max packet size for sendFramedMessage(); updated when InfoResponse arrives.
+    private int maxPacketSize = DEFAULT_MAX_PACKET_SIZE;
+
+    // =========================================================================
+    // Receive buffer for incoming TX characteristic notifications.
+    // SPIKE Prime frames: [0x01] … [0x02]
+    // Bytes accumulate here across potentially fragmented BLE packets.
+    // =========================================================================
+    private final List<Byte> receiveBuffer = new ArrayList<>();
+
+    // =========================================================================
+    // Scanning / device-discovery state
+    // =========================================================================
+    private boolean debugMode      = true;
+    private int     scanInterval   = 1000; // ms between RSSI-staleness checks
+    private Timer   scanTimer;
     private Handler mainHandler;
-    
-    // List to store LEGO SPIKE Prime hubs only (includes both visible and hidden hubs)
-    private List<LegoHub> legoHubs = new ArrayList<>();
-    
-    // Previous hub state for change tracking
-    private List<LegoHub> previousLegoHubs = new ArrayList<>();
-    
-    // Known LEGO SPIKE Prime hub names
+
+    // Known hub display names used as a fallback filter alongside UUID detection.
+    private String customDeviceName = "LEGO Hub";
     private static final Set<String> LEGO_HUB_NAMES = new HashSet<>(Arrays.asList(
-        "MITNodeHub",
-        "LEGO Technic Hub",
-        "LEGO Hub",
-        "SPIKE Prime Hub",
-        "SPIKE Hub"
+        "MITNodeHub", "LEGO Technic Hub", "LEGO Hub", "SPIKE Prime Hub", "SPIKE Hub"
     ));
-    
-    /**
-     * Class to represent a LEGO hub
-     */
+
+    // All discovered LEGO hubs (visible + hidden ghost devices).
+    private final List<LegoHub> legoHubs = new ArrayList<>();
+
+    // =========================================================================
+    // LegoHub — inner class with RSSI-staleness detection.
+    // CLAUDE.md Rule 2: DO NOT REMOVE this class or its isVisible() logic.
+    // Ghost devices (BLE cache artefacts) have static RSSI over 3+ scans.
+    // =========================================================================
     private class LegoHub {
-        private String name;
-        private String address;
-        private int bleIndex;
-        private long lastSeenTimestamp;
-        private int lastRssi;
-        private int rssiStaleCount;
-        
-        public LegoHub(String name, String address, int bleIndex) {
-            this.name = name;
+        private final String name;
+        private final String address;
+        private int    bleIndex;
+        private long   lastSeenTimestamp;
+        private int    lastRssi      = Integer.MIN_VALUE;
+        private int    rssiStaleCount = 0;
+        private Boolean frozenVisibility = null; // set only on snapshot copies
+
+        LegoHub(String name, String address, int bleIndex) {
+            this.name    = name;
             this.address = address;
             this.bleIndex = bleIndex;
             this.lastSeenTimestamp = System.currentTimeMillis();
-            this.lastRssi = Integer.MIN_VALUE; // Initialize with invalid RSSI
-            this.rssiStaleCount = 0;
         }
-        
-        // Copy constructor for creating snapshots with frozen visibility state
-        public LegoHub(LegoHub other, boolean frozenVisibility) {
-            this.name = other.name;
-            this.address = other.address;
-            this.bleIndex = other.bleIndex;
-            this.lastSeenTimestamp = other.lastSeenTimestamp;
-            this.lastRssi = other.lastRssi;
-            this.rssiStaleCount = other.rssiStaleCount;
-            this.frozenVisibility = frozenVisibility;
+
+        /** Snapshot copy with frozen visibility for change-delta calculation. */
+        LegoHub(LegoHub src, boolean frozen) {
+            this.name              = src.name;
+            this.address           = src.address;
+            this.bleIndex          = src.bleIndex;
+            this.lastSeenTimestamp = src.lastSeenTimestamp;
+            this.lastRssi          = src.lastRssi;
+            this.rssiStaleCount    = src.rssiStaleCount;
+            this.frozenVisibility  = frozen;
         }
-        
-        private Boolean frozenVisibility = null; // For snapshot copies
-        
-        public String getName() {
-            return name;
+
+        String getName()    { return name; }
+        String getAddress() { return address; }
+        int    getBleIndex(){ return bleIndex; }
+
+        void updateLastSeen() { lastSeenTimestamp = System.currentTimeMillis(); }
+
+        /** Returns true when RSSI changed (fresh advertisement); false when stale. */
+        boolean updateRssi(int newRssi) {
+            if (lastRssi == newRssi) { rssiStaleCount++; return false; }
+            lastRssi = newRssi; rssiStaleCount = 0; return true;
         }
-        
-        public String getAddress() {
-            return address;
+
+        /** Hybrid staleness: hidden only when BOTH RSSI and timestamp are stale. */
+        boolean isVisible() {
+            if (frozenVisibility != null) return frozenVisibility;
+            boolean rssiStale = rssiStaleCount >= 3;
+            boolean timeStale = (System.currentTimeMillis() - lastSeenTimestamp)
+                                 > (2L * LegoSpikePrime.this.scanInterval);
+            return !(rssiStale && timeStale);
         }
-        
-        public int getBleIndex() {
-            return bleIndex;
+
+        @Override public boolean equals(Object o) {
+            return o instanceof LegoHub && address.equals(((LegoHub)o).address);
         }
-        
-        public long getLastSeenTimestamp() {
-            return lastSeenTimestamp;
-        }
-        
-        public void updateLastSeen() {
-            this.lastSeenTimestamp = System.currentTimeMillis();
-        }
-        
-        public boolean updateRssi(int newRssi) {
-            if (this.lastRssi == newRssi) {
-                this.rssiStaleCount++;
-                return false; // RSSI hasn't changed
-            } else {
-                this.lastRssi = newRssi;
-                this.rssiStaleCount = 0;
-                return true; // RSSI changed
-            }
-        }
-        
-        public boolean isRssiStale(int maxStaleCount) {
-            return this.rssiStaleCount >= maxStaleCount;
-        }
-        
-        public boolean isVisible() {
-            // If this is a snapshot copy, return the frozen visibility state
-            if (frozenVisibility != null) {
-                return frozenVisibility;
-            }
-            
-            // Hybrid approach: Device is hidden if BOTH RSSI is stale AND timestamp is stale
-            boolean rssiStale = this.rssiStaleCount >= 3;
-            boolean timestampStale = (System.currentTimeMillis() - this.lastSeenTimestamp) > (2 * LegoSpikePrime.this.scanInterval);
-            return !(rssiStale && timestampStale);
-        }
-        
-        public int getLastRssi() {
-            return this.lastRssi;
-        }
-        
-        @Override
-        public String toString() {
-            return name + " (" + address + ")";
-        }
-        
-        @Override
-        public boolean equals(Object obj) {
-            if (this == obj) return true;
-            if (obj == null || getClass() != obj.getClass()) return false;
-            LegoHub other = (LegoHub) obj;
-            return address.equals(other.address);
-        }
-        
-        @Override
-        public int hashCode() {
-            return address.hashCode();
-        }
+        @Override public int hashCode() { return address.hashCode(); }
+        @Override public String toString() { return name + " (" + address + ")"; }
     }
-    
-    /**
-     * Constructor for the LegoSpikePrime extension
-     * 
-     * @param container the container this component will be placed in
-     */
+
+    // =========================================================================
+    // Constructor
+    // =========================================================================
     public LegoSpikePrime(ComponentContainer container) {
         super(container.$form());
-        mainHandler = new Handler(Looper.getMainLooper());
+        mainHandler        = new Handler(Looper.getMainLooper());
         bluetoothInterface = new BluetoothInterfaceImpl();
         bluetoothInterface.setExtension(this);
-        logDebug("LegoSpikePrime extension initialized");
+        logDebug("LegoSpikePrime initialised — service UUID: " + SPIKE_SERVICE_UUID);
     }
-    
-    /**
-     * Log debug messages if debug mode is enabled
-     * 
-     * @param message the message to log
-     */
-    private void logDebug(String message) {
-        if (debugMode) {
-            Log.d(LOG_TAG, message);
-        }
-    }
-    
-    /**
-     * Set the BluetoothLE component to use for communication
-     * 
-     * @param bluetoothLE the BluetoothLE component
-     */
+
+    // =========================================================================
+    // BluetoothDevice property — wires the BluetoothLE component
+    // =========================================================================
     @SimpleProperty(category = PropertyCategory.BEHAVIOR,
-                   description = "The BluetoothLE component used for communication with BLE devices")
-    @DesignerProperty(editorType = PropertyTypeConstants.PROPERTY_TYPE_COMPONENT + 
-                      ":edu.mit.appinventor.ble.BluetoothLE")
-    public void BluetoothDevice(Component bluetoothLE) {
-        this.bluetoothLE = bluetoothLE;
-        bluetoothInterface.setBluetoothLE(bluetoothLE);
-        logDebug("BluetoothLE component set: " + bluetoothLE);
-        
-        // Register for BluetoothLE events
-        try {
-            // Register for DeviceFound event
-            java.lang.reflect.Method registerEventMethod = 
-                bluetoothLE.getClass().getMethod("DeviceFound", Object.class, String.class, String.class, int.class);
-            registerEventMethod.invoke(bluetoothLE, this, "BluetoothLE_DeviceFound", "%s %s %s", 3);
-            
-            // Register for ScanningStateChanged event
-            registerEventMethod = 
-                bluetoothLE.getClass().getMethod("ScanningStateChanged", Object.class, String.class, String.class, int.class);
-            registerEventMethod.invoke(bluetoothLE, this, "BluetoothLE_ScanningStateChanged", "%s", 1);
-            
-            // Register for Connected event
-            registerEventMethod = 
-                bluetoothLE.getClass().getMethod("Connected", Object.class, String.class, String.class, int.class);
-            registerEventMethod.invoke(bluetoothLE, this, "BluetoothLE_Connected", "%s", 1);
-            
-            // Register for Disconnected event
-            registerEventMethod = 
-                bluetoothLE.getClass().getMethod("Disconnected", Object.class, String.class, String.class, int.class);
-            registerEventMethod.invoke(bluetoothLE, this, "BluetoothLE_Disconnected", "", 0);
-            
-            logDebug("Successfully registered for BluetoothLE events");
-        } catch (Exception e) {
-            logDebug("Error registering for BluetoothLE events: " + e);
-            e.printStackTrace();
-        }
+        description = "The BluetoothLE component used for BLE communication")
+    @DesignerProperty(editorType = PropertyTypeConstants.PROPERTY_TYPE_COMPONENT
+        + ":edu.mit.appinventor.ble.BluetoothLE")
+    public void BluetoothDevice(Component ble) {
+        this.bluetoothLE = ble;
+        bluetoothInterface.setBluetoothLE(ble);
+        logDebug("BluetoothLE component set");
     }
-    
-    /**
-     * Get the BluetoothLE component
-     * 
-     * @return the BluetoothLE component
-     */
+
     @SimpleProperty(category = PropertyCategory.BEHAVIOR,
-                   description = "The BluetoothLE component used for communication with BLE devices")
-    public Component BluetoothDevice() {
-        return bluetoothLE;
-    }
-    
-    /**
-     * Set debug mode
-     * 
-     * @param enabled whether debug mode is enabled
-     */
+        description = "The BluetoothLE component used for BLE communication")
+    public Component BluetoothDevice() { return bluetoothLE; }
+
+    // =========================================================================
+    // Simple properties
+    // =========================================================================
     @SimpleProperty(category = PropertyCategory.BEHAVIOR,
-                   description = "Whether debug mode is enabled")
+        description = "Enable verbose logcat output")
     @DesignerProperty(editorType = PropertyTypeConstants.PROPERTY_TYPE_BOOLEAN,
-                     defaultValue = "True")
-    public void DebugMode(boolean enabled) {
-        debugMode = enabled;
-        logDebug("Debug mode set to: " + enabled);
-    }
-    
-    /**
-     * Get debug mode
-     * 
-     * @return whether debug mode is enabled
-     */
+        defaultValue = "True")
+    public void DebugMode(boolean v) { debugMode = v; }
+
     @SimpleProperty(category = PropertyCategory.BEHAVIOR,
-                   description = "Whether debug mode is enabled")
-    public boolean DebugMode() {
-        return debugMode;
-    }
-    
-    /**
-     * Set the custom device name to detect
-     * 
-     * @param deviceName the custom device name to detect
-     */
+        description = "Enable verbose logcat output")
+    public boolean DebugMode() { return debugMode; }
+
     @SimpleProperty(category = PropertyCategory.BEHAVIOR,
-                   description = "Custom device name to detect (case insensitive)")
+        description = "Custom BLE device name to match during scanning")
     @DesignerProperty(editorType = PropertyTypeConstants.PROPERTY_TYPE_STRING,
-                     defaultValue = "LEGO Hub")
-    public void CustomDeviceName(String deviceName) {
-        this.customDeviceName = deviceName;
-        logDebug("Custom device name set to: " + deviceName);
-    }
-    
-    /**
-     * Get the custom device name to detect
-     * 
-     * @return the custom device name to detect
-     */
+        defaultValue = "LEGO Hub")
+    public void CustomDeviceName(String v) { customDeviceName = v; }
+
     @SimpleProperty(category = PropertyCategory.BEHAVIOR,
-                   description = "Custom device name to detect (case insensitive)")
-    public String CustomDeviceName() {
-        return customDeviceName;
-    }
-    
-    /**
-     * Set the scan interval for real-time scanning
-     * 
-     * @param interval the scan interval in milliseconds
-     */
+        description = "Custom BLE device name to match during scanning")
+    public String CustomDeviceName() { return customDeviceName; }
+
     @SimpleProperty(category = PropertyCategory.BEHAVIOR,
-                   description = "Scan interval in milliseconds for real-time scanning")
+        description = "Milliseconds between RSSI-staleness checks")
     @DesignerProperty(editorType = PropertyTypeConstants.PROPERTY_TYPE_INTEGER,
-                     defaultValue = "1000")
-    public void ScanInterval(int interval) {
-        if (interval < 100) {
-            interval = 100; // Minimum 100ms to avoid excessive scanning
-        }
-        this.scanInterval = interval;
-        logDebug("Scan interval set to: " + interval + "ms");
-    }
-    
-    /**
-     * Get the scan interval for real-time scanning
-     * 
-     * @return the scan interval in milliseconds
-     */
-    @SimpleProperty(category = PropertyCategory.BEHAVIOR,
-                   description = "Scan interval in milliseconds for real-time scanning")
-    public int ScanInterval() {
-        return scanInterval;
-    }
-    
-    /**
-     * Get whether the extension is currently scanning for devices
-     * 
-     * @return whether the extension is currently scanning
-     */
-    @SimpleProperty(category = PropertyCategory.BEHAVIOR,
-                   description = "Whether the extension is currently scanning for devices")
-    public boolean IsScanning() {
-        return isScanning;
-    }
-    
-    /**
-     * Get whether the extension is connected to a hub
-     * 
-     * @return whether the extension is connected to a hub
-     */
-    @SimpleProperty(category = PropertyCategory.BEHAVIOR,
-                   description = "Whether the extension is connected to a hub")
-    public boolean IsConnected() {
-        return isConnected;
-    }
-    
-    /**
-     * Get the name of the connected device
-     * 
-     * @return the name of the connected device
-     */
-    @SimpleProperty(category = PropertyCategory.BEHAVIOR,
-                   description = "The name of the connected device")
-    public String ConnectedDeviceName() {
-        return connectedDeviceName;
-    }
-    
-    /**
-     * Get the address of the connected device
-     * 
-     * @return the address of the connected device
-     */
-    @SimpleProperty(category = PropertyCategory.BEHAVIOR,
-                   description = "The address of the connected device")
-    public String ConnectedDeviceAddress() {
-        return connectedDeviceAddress;
-    }
+        defaultValue = "1000")
+    public void ScanInterval(int ms) { scanInterval = Math.max(100, ms); }
 
+    @SimpleProperty(category = PropertyCategory.BEHAVIOR,
+        description = "Milliseconds between RSSI-staleness checks")
+    public int ScanInterval() { return scanInterval; }
 
-    
+    @SimpleProperty(category = PropertyCategory.BEHAVIOR,
+        description = "True while a BLE scan is running")
+    public boolean IsScanning() { return isScanning; }
+
+    @SimpleProperty(category = PropertyCategory.BEHAVIOR,
+        description = "True when connected to a hub")
+    public boolean IsConnected() { return isConnected; }
+
+    @SimpleProperty(category = PropertyCategory.BEHAVIOR,
+        description = "Name of the currently connected hub, or empty string")
+    public String ConnectedDeviceName() { return connectedDeviceName; }
+
+    @SimpleProperty(category = PropertyCategory.BEHAVIOR,
+        description = "BLE address of the currently connected hub, or empty string")
+    public String ConnectedDeviceAddress() { return connectedDeviceAddress; }
+
+    @SimpleProperty(category = PropertyCategory.BEHAVIOR,
+        description = "Max BLE packet size (set automatically from InfoResponse)")
+    public int MaxPacketSize() { return maxPacketSize; }
+
+    // =========================================================================
+    // Scanning
+    // =========================================================================
+
     /**
-     * Start scanning for LEGO SPIKE Prime hubs
-     * This method starts scanning for BLE devices using the BluetoothLE component
-     * and sets up a timer for real-time scanning
+     * Scan for SPIKE Prime hubs advertising the fd02 service UUID.
+     * Attempts UUID-filtered scanning first; falls back to a general scan.
+     * Fires HubFound for each qualifying device discovered.
      */
-    @SimpleFunction(description = "Start scanning for LEGO SPIKE Prime hubs")
-    public void StartScanning() {
-        if (bluetoothLE == null) {
-            logDebug("Error: BluetoothLE component not set");
-            ErrorOccurred("BluetoothLE component not set");
-            return;
-        }
-        
-        if (isScanning) {
-            logDebug("Already scanning, stopping current scan first");
-            StopScanning();
-        }
-        
-        // Store previous state before clearing for change tracking
-        List<LegoHub> oldHubs = new ArrayList<>(legoHubs);
-        
-        // Clear the list of LEGO hubs (Option 4: Clear device list when scanning starts)
+    @SimpleFunction(description =
+        "Start scanning for LEGO SPIKE Prime hubs (service UUID 0000fd02-...)")
+    public void ScanForHub() {
+        if (bluetoothLE == null) { ErrorOccurred("BluetoothLE component not set"); return; }
+        if (isScanning) StopScanning();
+
         legoHubs.clear();
-        previousLegoHubs.clear();
-        logDebug("Cleared device list for fresh scan");
-        
-        // Trigger HubListChanged event if there were devices that got cleared
-        if (!oldHubs.isEmpty()) {
-            String newHubs = "";
-            String retainedHubs = "";
-            String lostHubs = buildHubListString(oldHubs);
-            String allCurrentHubs = "";
-            logDebug("Triggering HubListChanged after clearing device list: lost=[" + lostHubs + "]");
-            HubListChanged(newHubs, retainedHubs, lostHubs, allCurrentHubs);
+        logDebug("ScanForHub — attempting UUID-filtered scan for " + SPIKE_SERVICE_UUID);
+
+        boolean started = false;
+        // Try UUID-filtered scan first (available in newer BLE extension builds).
+        for (String method : new String[]{"StartScanningWithUUIDs", "ScanForService",
+                                          "StartScanningFiltered"}) {
+            try {
+                bluetoothLE.getClass()
+                    .getMethod(method, String.class)
+                    .invoke(bluetoothLE, SPIKE_SERVICE_UUID);
+                logDebug("UUID-filtered scan started via " + method);
+                started = true;
+                break;
+            } catch (NoSuchMethodException ignored) {
+            } catch (Exception e) {
+                logDebug(method + " failed: " + e.getMessage());
+            }
         }
-        
-        logDebug("Starting scan for LEGO SPIKE Prime hubs");
+
+        if (!started) {
+            // Fall back to unfiltered scan; device names are checked in CheckAllDevices.
+            try {
+                bluetoothLE.getClass().getMethod("StartScanning").invoke(bluetoothLE);
+                logDebug("Unfiltered BLE scan started (UUID filter not available)");
+                started = true;
+            } catch (Exception e) {
+                ErrorOccurred("Cannot start scan: " + e.getMessage()); return;
+            }
+        }
+
+        isScanning = true;
+        startScanTimer();
+        ScanningStarted();
+    }
+
+    /** Start scanning without UUID filter (legacy / manual control). */
+    @SimpleFunction(description = "Start scanning for all LEGO SPIKE Prime hubs")
+    public void StartScanning() {
+        if (bluetoothLE == null) { ErrorOccurred("BluetoothLE component not set"); return; }
+        if (isScanning) StopScanning();
+
+        legoHubs.clear();
+        logDebug("StartScanning");
         try {
-            // Call the StartScanning method on the BluetoothLE component
-            java.lang.reflect.Method startScanningMethod = 
-                bluetoothLE.getClass().getMethod("StartScanning");
-            startScanningMethod.invoke(bluetoothLE);
-            
-            // Set scanning state
+            bluetoothLE.getClass().getMethod("StartScanning").invoke(bluetoothLE);
             isScanning = true;
-            
-            // Start timer for real-time scanning
             startScanTimer();
-            
-            logDebug("Scan started successfully");
-            
-            // Trigger the ScanningStarted event
             ScanningStarted();
         } catch (Exception e) {
-            logDebug("Error starting scan: " + e.getMessage());
-            e.printStackTrace();
             ErrorOccurred("Error starting scan: " + e.getMessage());
         }
     }
-    
-    /**
-     * Stop scanning for LEGO SPIKE Prime hubs
-     * This method stops scanning for BLE devices and cancels the scan timer
-     */
+
+    /** Stop the current BLE scan. */
     @SimpleFunction(description = "Stop scanning for LEGO SPIKE Prime hubs")
     public void StopScanning() {
-        if (bluetoothLE == null) {
-            logDebug("Error: BluetoothLE component not set");
-            return;
-        }
-        
-        if (!isScanning) {
-            logDebug("Not currently scanning");
-            return;
-        }
-        
-        logDebug("Stopping scan for LEGO SPIKE Prime hubs");
+        if (bluetoothLE == null || !isScanning) return;
         try {
-            // Call the StopScanning method on the BluetoothLE component
-            java.lang.reflect.Method stopScanningMethod = 
-                bluetoothLE.getClass().getMethod("StopScanning");
-            stopScanningMethod.invoke(bluetoothLE);
-            
-            // Stop the scan timer
-            stopScanTimer();
-            
-            // Set scanning state
-            isScanning = false;
-            
-            logDebug("Scan stopped successfully");
-            
-            // Trigger the ScanningStopped event
-            ScanningStopped();
+            bluetoothLE.getClass().getMethod("StopScanning").invoke(bluetoothLE);
         } catch (Exception e) {
-            logDebug("Error stopping scan: " + e.getMessage());
-            e.printStackTrace();
-            ErrorOccurred("Error stopping scan: " + e.getMessage());
+            logDebug("StopScanning error: " + e.getMessage());
         }
-    }
-    
-    /**
-     * Start the scan timer for real-time scanning
-     */
-    private void startScanTimer() {
-        // Cancel any existing timer
         stopScanTimer();
-        
-        // Create a new timer
-        scanTimer = new Timer();
-        
-        // Schedule a timer task to check for devices periodically
+        isScanning = false;
+        ScanningStopped();
+    }
+
+    private void startScanTimer() {
+        stopScanTimer();
+        scanTimer = new Timer("LegoScanTimer", true);
         scanTimer.scheduleAtFixedRate(new TimerTask() {
-            @Override
-            public void run() {
-                if (isScanning) {
-                    // Check for devices - use the correct method name with capital C
-                    CheckAllDevices();
-                }
-            }
+            @Override public void run() { if (isScanning) CheckAllDevices(); }
         }, scanInterval, scanInterval);
-        
-        logDebug("Scan timer started with interval: " + scanInterval + "ms");
     }
-    
-    /**
-     * Stop the scan timer
-     */
+
     private void stopScanTimer() {
-        if (scanTimer != null) {
-            scanTimer.cancel();
-            scanTimer = null;
-            logDebug("Scan timer stopped");
-        }
+        if (scanTimer != null) { scanTimer.cancel(); scanTimer = null; }
     }
-    
+
     /**
-     * Check if a device at the given index is a LEGO SPIKE Prime hub
-     * 
-     * @param index the index of the hub in the LEGO hubs list (1-based)
-     * @return true if the device is a LEGO SPIKE Prime hub
+     * Iterate all BLE-cached devices, update RSSI staleness, fire HubListChanged
+     * when visibility changes.  CLAUDE.md Rule 2: DO NOT REMOVE this method.
      */
-    @SimpleFunction(description = "Check if a device at the given index in the LEGO hubs list is a LEGO SPIKE Prime hub (1-based)")
-    public boolean CheckDeviceAtIndex(int index) {
-        if (bluetoothLE == null) {
-            logDebug("Error: BluetoothLE component not set");
-            return false;
-        }
-        
-        List<LegoHub> visibleHubs = getVisibleHubs();
-        if (index < 1 || index > visibleHubs.size()) {
-            logDebug("Error: Invalid hub index: " + index + ". Valid range: 1 to " + visibleHubs.size());
-            return false;
-        }
-        
-        try {
-            // Get the hub from our visible list
-            LegoHub hub = visibleHubs.get(index - 1);
-            int bleIndex = hub.getBleIndex(); // Get the stored BLE index
-            
-            // Get the device name at the BLE index
-            java.lang.reflect.Method getDeviceNameMethod = 
-                bluetoothLE.getClass().getMethod("FoundDeviceName", int.class);
-            String deviceName = (String) getDeviceNameMethod.invoke(bluetoothLE, bleIndex);
-            
-            // Get the device address at the BLE index
-            java.lang.reflect.Method getDeviceAddressMethod = 
-                bluetoothLE.getClass().getMethod("FoundDeviceAddress", int.class);
-            String deviceAddress = (String) getDeviceAddressMethod.invoke(bluetoothLE, bleIndex);
-            
-            logDebug("Checking hub at filtered index " + index + " (BLE index " + bleIndex + "): " + deviceName + " (" + deviceAddress + ")");
-            
-            // Verify this is still a LEGO SPIKE Prime hub
-            boolean isLegoHub = isLegoSpikeHub(deviceName);
-            
-            if (isLegoHub) {
-                logDebug("LEGO SPIKE Prime hub confirmed: " + deviceName);
-                return true;
-            } else {
-                logDebug("Device is no longer a LEGO SPIKE Prime hub: " + deviceName);
-                return false;
-            }
-        } catch (Exception e) {
-            logDebug("Error checking device at filtered index " + index + ": " + e);
-            e.printStackTrace();
-            return false;
-        }
-    }
-    
-    /**
-     * Check all devices for LEGO SPIKE Prime hubs and track changes
-     */
-    @SimpleFunction(description = "Check all devices for LEGO SPIKE Prime hubs")
+    @SimpleFunction(description = "Refresh hub list using RSSI staleness detection")
     public void CheckAllDevices() {
-        if (bluetoothLE == null) {
-            logDebug("Error: BluetoothLE component not set");
-            return;
-        }
-        
+        if (bluetoothLE == null) return;
         try {
-            // Store previous state for change tracking with frozen visibility snapshots
-            List<LegoHub> oldHubs = new ArrayList<>();
-            for (LegoHub hub : legoHubs) {
-                // Create snapshot with current visibility state frozen
-                oldHubs.add(new LegoHub(hub, hub.isVisible()));
-            }
-            
-            // REMOVED: Timeout-based removal logic - now using RSSI staleness detection
-            // Devices are hidden via isVisible() method instead of being removed
-            
-            // Get the device list from the BluetoothLE component
-            java.lang.reflect.Method getDeviceListMethod = 
-                bluetoothLE.getClass().getMethod("DeviceList");
-            String deviceListStr = (String) getDeviceListMethod.invoke(bluetoothLE);
-            
-            logDebug("Device list: " + deviceListStr);
-            
+            // Snapshot visibility before update
+            List<LegoHub> oldSnap = new ArrayList<>();
+            for (LegoHub h : legoHubs) oldSnap.add(new LegoHub(h, h.isVisible()));
+
+            String deviceListStr;
+            try {
+                deviceListStr = (String) bluetoothLE.getClass()
+                    .getMethod("DeviceList").invoke(bluetoothLE);
+            } catch (Exception e) { return; }
+
             if (deviceListStr == null || deviceListStr.isEmpty()) {
-                logDebug("No devices found to check");
-                // Calculate visibility changes for empty device list (consistent with visible-only logic)
-                List<LegoHub> visibleHubs = getVisibleHubs();
-                List<LegoHub> previousVisibleHubs = getVisibleHubsFromList(oldHubs);
-                String newHubs = "";
-                String retainedHubs = buildHubListString(visibleHubs);
-                String lostHubs = buildLostHubsString(previousVisibleHubs, visibleHubs);
-                String allCurrentHubs = LegoHubsList();
-                
-                // Trigger HubListChanged event if there are any changes
-                if (!lostHubs.isEmpty()) {
-                    HubListChanged(newHubs, retainedHubs, lostHubs, allCurrentHubs);
-                }
-                return;
+                dispatchHubListChangedIfNeeded(oldSnap); return;
             }
-            
-            // Split the device list by commas to get individual device entries
-            String[] deviceEntries = deviceListStr.split(",");
-            int deviceCount = deviceEntries.length;
-            
-            logDebug("Found " + deviceCount + " total BLE devices");
-            
-            // Mark all current hubs as not seen in this scan
-            Set<String> seenAddresses = new HashSet<>();
-            
-            // Check each device in the list
-            // Note: This uses BLE device indexes (1-based) for internal scanning
-            for (int i = 1; i <= deviceCount; i++) {
-                logDebug("Checking BLE device " + i + " of " + deviceCount);
-                String deviceAddress = checkBLEDeviceAtIndex(i, seenAddresses); // Updated method signature
-            }
-            
-            // REMOVED: Timestamp updates based on BLE cache (causes timeout to never trigger)
-            // Timestamps are now only updated when devices are actively discovered via BluetoothLE_DeviceFound
-            
-            // Calculate visibility changes between scans (SIMPLE ADDRESS COMPARISON - NO HASHMAP)
-            List<LegoHub> visibleOldHubs = getVisibleHubsFromList(oldHubs);
-            List<LegoHub> visibleCurrentHubs = getVisibleHubs();
-            
-            // Calculate changes and build hub lists (BASED ON WORKING VERSION LOGIC)
-            List<LegoHub> newHubsList = new ArrayList<>();
-            List<LegoHub> retainedHubsList = new ArrayList<>();
-            List<LegoHub> lostHubsList = new ArrayList<>();
-            
-            // Count new and retained visible devices
-            for (LegoHub currentHub : visibleCurrentHubs) {
-                boolean wasPresent = false;
-                for (LegoHub oldHub : visibleOldHubs) {
-                    if (currentHub.getAddress() != null && oldHub.getAddress() != null && 
-                        currentHub.getAddress().equals(oldHub.getAddress())) {
-                        wasPresent = true;
-                        break;
-                    }
-                }
-                if (wasPresent) {
-                    retainedHubsList.add(currentHub);
-                } else {
-                    newHubsList.add(currentHub);
-                }
-            }
-            
-            // Count lost visible devices
-            for (LegoHub oldHub : visibleOldHubs) {
-                boolean stillPresent = false;
-                for (LegoHub currentHub : visibleCurrentHubs) {
-                    if (oldHub.getAddress() != null && currentHub.getAddress() != null && 
-                        oldHub.getAddress().equals(currentHub.getAddress())) {
-                        stillPresent = true;
-                        break;
-                    }
-                }
-                if (!stillPresent) {
-                    lostHubsList.add(oldHub);
-                }
-            }
-            
-            logDebug("Found " + legoHubs.size() + " total LEGO SPIKE Prime hubs (" + visibleCurrentHubs.size() + " visible)");
-            
-            // Trigger HubListChanged event if there are any visibility changes
-            if (!newHubsList.isEmpty() || !lostHubsList.isEmpty()) {
-                String newHubs = buildHubListString(newHubsList);
-                String retainedHubs = buildHubListString(retainedHubsList);
-                String lostHubs = buildHubListString(lostHubsList);
-                String allCurrentHubs = LegoHubsList();
-                HubListChanged(newHubs, retainedHubs, lostHubs, allCurrentHubs);
-            }
-            
+
+            int count = deviceListStr.split(",").length;
+            Set<String> seen = new HashSet<>();
+            for (int i = 1; i <= count; i++) checkBLEDeviceAtIndex(i, seen);
+
+            dispatchHubListChangedIfNeeded(oldSnap);
         } catch (Exception e) {
-            logDebug("Error checking devices: " + e);
-            e.printStackTrace();
+            logDebug("CheckAllDevices error: " + e);
         }
     }
-    
-    /**
-     * Get the list of LEGO SPIKE Prime hubs as a string
-     * 
-     * @return the list of LEGO SPIKE Prime hubs as a string
-     */
-    @SimpleProperty(category = PropertyCategory.BEHAVIOR,
-                   description = "The list of LEGO SPIKE Prime hubs as a string")
-    public String LegoHubsList() {
-        List<LegoHub> visibleHubs = getVisibleHubs();
-        StringBuilder sb = new StringBuilder();
-        boolean first = true;
-        for (LegoHub hub : visibleHubs) {
-            if (!first) {
-                sb.append(",");
+
+    /** CLAUDE.md Rule 3: null-safe BLE index inspection. */
+    private String checkBLEDeviceAtIndex(int bleIndex, Set<String> seen) {
+        try {
+            String name = (String) bluetoothLE.getClass()
+                .getMethod("FoundDeviceName", int.class).invoke(bluetoothLE, bleIndex);
+            String addr = (String) bluetoothLE.getClass()
+                .getMethod("FoundDeviceAddress", int.class).invoke(bluetoothLE, bleIndex);
+            Integer rssi = (Integer) bluetoothLE.getClass()
+                .getMethod("FoundDeviceRssi", int.class).invoke(bluetoothLE, bleIndex);
+
+            // CLAUDE.md Rule 3: always null-check address before map access
+            if (addr == null) return null;
+
+            if (!isLegoSpikeHub(name)) return null;
+
+            seen.add(addr);
+
+            // Find or create hub entry
+            LegoHub existing = null;
+            for (LegoHub h : legoHubs) {
+                if (addr.equals(h.getAddress())) { existing = h; break; }
             }
-            sb.append(hub.getName());
-            first = false;
+            if (existing == null) {
+                LegoHub hub = new LegoHub(name != null ? name : "SPIKE Hub", addr, bleIndex);
+                if (rssi != null) hub.updateRssi(rssi);
+                legoHubs.add(hub);
+                // Fire HubFound on the main thread for the new discovery
+                final String finalName = hub.getName();
+                final String finalAddr = addr;
+                mainHandler.post(() -> HubFound(finalName, finalAddr));
+            } else {
+                existing.bleIndex = bleIndex;
+                if (rssi != null && existing.updateRssi(rssi)) existing.updateLastSeen();
+            }
+            return addr;
+        } catch (Exception e) {
+            logDebug("checkBLEDeviceAtIndex(" + bleIndex + ") error: " + e);
+            return null;
         }
-        return sb.toString();
     }
-    
-    /**
-     * Get the number of LEGO SPIKE Prime hubs found
-     * 
-     * @return the number of LEGO SPIKE Prime hubs found
-     */
-    @SimpleFunction(description = "Get the number of LEGO SPIKE Prime hubs found")
-    public int GetLegoHubCount() {
-        return getVisibleHubs().size();
+
+    /** Compare visibility snapshots and fire HubListChanged if anything changed. */
+    private void dispatchHubListChangedIfNeeded(List<LegoHub> oldSnap) {
+        List<LegoHub> oldVisible = visibleFrom(oldSnap);
+        List<LegoHub> nowVisible = getVisibleHubs();
+
+        List<LegoHub> gained = new ArrayList<>(), lost = new ArrayList<>(),
+                      kept   = new ArrayList<>();
+        for (LegoHub h : nowVisible) {
+            if (containsAddress(oldVisible, h.getAddress())) kept.add(h);
+            else gained.add(h);
+        }
+        for (LegoHub h : oldVisible) {
+            if (!containsAddress(nowVisible, h.getAddress())) lost.add(h);
+        }
+        if (!gained.isEmpty() || !lost.isEmpty()) {
+            HubListChanged(hubNames(gained), hubNames(kept), hubNames(lost), LegoHubsList());
+        }
     }
-    
-    /**
-     * Get the name of a LEGO SPIKE Prime hub at the given index
-     * 
-     * @param index the index of the hub in the LEGO hubs list (1-based)
-     * @return the name of the hub
-     */
-    @SimpleFunction(description = "Get the name of a LEGO SPIKE Prime hub at the given index in the LEGO hubs list (1-based)")
+
+    private static boolean containsAddress(List<LegoHub> list, String addr) {
+        if (addr == null) return false;
+        for (LegoHub h : list) { if (addr.equals(h.getAddress())) return true; }
+        return false;
+    }
+
+    // =========================================================================
+    // Hub list accessors
+    // =========================================================================
+    @SimpleProperty(category = PropertyCategory.BEHAVIOR,
+        description = "Comma-separated names of currently visible hubs")
+    public String LegoHubsList() {
+        return hubNames(getVisibleHubs());
+    }
+
+    @SimpleFunction(description = "Number of visible LEGO SPIKE Prime hubs")
+    public int GetLegoHubCount() { return getVisibleHubs().size(); }
+
+    @SimpleFunction(description = "Name of hub at 1-based index in visible hub list")
     public String GetLegoHubName(int index) {
-        List<LegoHub> visibleHubs = getVisibleHubs();
-        if (index < 1 || index > visibleHubs.size()) {
-            logDebug("Error: Invalid hub index: " + index + ". Valid range: 1 to " + visibleHubs.size());
-            return "";
-        }
-        
-        return visibleHubs.get(index - 1).getName();
+        List<LegoHub> v = getVisibleHubs();
+        return (index >= 1 && index <= v.size()) ? v.get(index-1).getName() : "";
     }
-    
-    /**
-     * Get the address of a LEGO SPIKE Prime hub at the given index
-     * 
-     * @param index the index of the hub in the LEGO hubs list (1-based)
-     * @return the address of the hub
-     */
-    @SimpleFunction(description = "Get the address of a LEGO SPIKE Prime hub at the given index in the LEGO hubs list (1-based)")
+
+    @SimpleFunction(description = "BLE address of hub at 1-based index in visible hub list")
     public String GetLegoHubAddress(int index) {
-        List<LegoHub> visibleHubs = getVisibleHubs();
-        if (index < 1 || index > visibleHubs.size()) {
-            logDebug("Error: Invalid hub index: " + index + ". Valid range: 1 to " + visibleHubs.size());
-            return "";
-        }
-        
-        return visibleHubs.get(index - 1).getAddress();
+        List<LegoHub> v = getVisibleHubs();
+        return (index >= 1 && index <= v.size()) ? v.get(index-1).getAddress() : "";
     }
 
+    // =========================================================================
+    // Connection
+    // =========================================================================
 
-    
     /**
-     * Connect to a LEGO SPIKE Prime hub at the given index in the LEGO hubs list
-     * 
-     * @param index the index of the hub in the LEGO hubs list (1-based)
-     * @return true if the connection was initiated successfully
+     * Connect to a hub by its 1-based index in the visible hub list.
+     * Stops scanning before connecting (CLAUDE.md Rule 4).
+     * After BLE fires Connected, onConnected() subscribes to the TX characteristic.
      */
-    @SimpleFunction(description = "Connect to a LEGO SPIKE Prime hub at the given index in the LEGO hubs list (1-based)")
+    @SimpleFunction(description =
+        "Connect to the LEGO SPIKE Prime hub at the given index (1-based)")
     public boolean ConnectToHub(int index) {
-        if (bluetoothLE == null) {
-            logDebug("Error: BluetoothLE component not set");
-            ErrorOccurred("BluetoothLE component not set");
-            return false;
+        if (bluetoothLE == null) { ErrorOccurred("BluetoothLE component not set"); return false; }
+
+        List<LegoHub> visible = getVisibleHubs();
+        if (index < 1 || index > visible.size()) {
+            ErrorOccurred("Invalid hub index: " + index); return false;
         }
-        
-        List<LegoHub> visibleHubs = getVisibleHubs();
-        if (index < 1 || index > visibleHubs.size()) {
-            logDebug("Error: Invalid hub index: " + index + ". Valid range: 1 to " + visibleHubs.size());
-            ErrorOccurred("Invalid hub index: " + index + ". Valid range: 1 to " + visibleHubs.size());
-            return false;
-        }
-        
-        if (isConnected) {
-            logDebug("Already connected to a hub, disconnecting first");
-            Disconnect();
-        }
-        
-        // Stop scanning during connection attempt
+        if (isConnected) Disconnect();
+
+        // CLAUDE.md Rule 4: stop scanning before connecting, remember to resume.
         if (isScanning) {
             wasScanningBeforeConnection = true;
             stopScanTimer();
-            isScanning = false;  // Update scanning state
-            ScanningStopped();   // Trigger ScanningStopped event
-            logDebug("Stopped scanning for connection attempt");
+            isScanning = false;
+            ScanningStopped();
         } else {
             wasScanningBeforeConnection = false;
         }
-        
-        LegoHub hub = visibleHubs.get(index - 1);
-        logDebug("Connecting to hub: " + hub.getName() + " (" + hub.getAddress() + ")");
-        
+
+        LegoHub hub = visible.get(index - 1);
+        logDebug("ConnectToHub → " + hub);
         try {
-            // Call the ConnectWithAddress method on the BluetoothLE component
-            // This is the correct method name in the BluetoothLE component
-            java.lang.reflect.Method connectMethod = 
-                bluetoothLE.getClass().getMethod("ConnectWithAddress", String.class);
-            
-            // Convert the address to a String explicitly to avoid reflection errors
-            String deviceAddress = hub.getAddress();
-            connectMethod.invoke(bluetoothLE, deviceAddress);
-            
-            logDebug("Connection initiated to hub: " + hub.getName() + " (" + hub.getAddress() + ")");
+            bluetoothLE.getClass()
+                .getMethod("ConnectWithAddress", String.class)
+                .invoke(bluetoothLE, hub.getAddress());
             return true;
         } catch (Exception e) {
-            logDebug("Error connecting to hub: " + e);
-            e.printStackTrace();
-            ErrorOccurred("Failed to connect: " + e);
-            
-            // Restart scanning if connection failed and we were scanning before
+            ErrorOccurred("Connect failed: " + e.getMessage());
             if (wasScanningBeforeConnection) {
-                logDebug("Restarting scanning after connection failure");
-                isScanning = true;        // Update scanning state
-                startScanTimer();
-                ScanningStarted();        // Trigger ScanningStarted event
+                isScanning = true; startScanTimer(); ScanningStarted();
             }
-            
             return false;
         }
     }
-    
-    /**
-     * Disconnect from the currently connected hub
-     */
+
+    /** Disconnect from the currently connected hub. */
     @SimpleFunction(description = "Disconnect from the currently connected hub")
     public void Disconnect() {
-        if (!isConnected) {
-            logDebug("Not connected to a hub");
+        if (!isConnected || bluetoothLE == null) return;
+        logDebug("Disconnect → " + connectedDeviceName);
+        try {
+            bluetoothLE.getClass().getMethod("Disconnect").invoke(bluetoothLE);
+        } catch (Exception e) {
+            ErrorOccurred("Disconnect failed: " + e.getMessage());
+        }
+    }
+
+    /**
+     * Subscribe to TX characteristic notifications.
+     * Called from onConnected() immediately after GATT connection is established.
+     * Hub → App data flows through this subscription.
+     */
+    private void registerForTXNotifications() {
+        if (bluetoothLE == null) return;
+        logDebug("Subscribing to TX notifications: " + TX_CHAR_UUID);
+        try {
+            bluetoothLE.getClass()
+                .getMethod("RegisterForBytes", String.class, String.class)
+                .invoke(bluetoothLE, SPIKE_SERVICE_UUID, TX_CHAR_UUID);
+            logDebug("TX notification subscription OK");
+        } catch (Exception e) {
+            logDebug("RegisterForBytes failed: " + e.getMessage());
+            ErrorOccurred("TX subscription failed: " + e.getMessage());
+        }
+    }
+
+    // =========================================================================
+    // Outbound — sendFramedMessage
+    // =========================================================================
+
+    /**
+     * Write a fully-framed message (output of MessageFramer.pack) to the hub's
+     * RX characteristic, splitting into chunks of maxPacketSize if needed.
+     *
+     * @param framedMessage bytes produced by MessageFramer.pack(rawMsg)
+     */
+    private void sendFramedMessage(byte[] framedMessage) {
+        if (bluetoothLE == null || !isConnected) {
+            logDebug("sendFramedMessage: not connected, dropping message");
             return;
         }
-        
-        logDebug("Disconnecting from hub: " + connectedDeviceName + " (" + connectedDeviceAddress + ")");
-        
+        logDebug("sendFramedMessage: " + framedMessage.length
+            + " bytes, packetSize=" + maxPacketSize);
         try {
-            // Call the Disconnect method on the BluetoothLE component
-            java.lang.reflect.Method disconnectMethod = 
-                bluetoothLE.getClass().getMethod("Disconnect");
-            disconnectMethod.invoke(bluetoothLE);
-            
-            logDebug("Disconnection initiated from hub");
-        } catch (Exception e) {
-            logDebug("Error disconnecting from hub: " + e);
-            e.printStackTrace();
-            ErrorOccurred("Failed to disconnect: " + e);
-        }
-    }
-    
-    /**
-     * Set the color of the hub LED
-     * 
-     * @param red the red component (0-255)
-     * @param green the green component (0-255)
-     * @param blue the blue component (0-255)
-     * @return true if the command was sent successfully
-     */
-    @SimpleFunction(description = "Set the color of the hub LED")
-    public boolean SetHubLEDColor(int red, int green, int blue) {
-        if (!isConnected) {
-            logDebug("Error: Not connected to a hub");
-            ErrorOccurred("Not connected to a hub");
-            return false;
-        }
-        
-        logDebug("Setting hub LED color to RGB(" + red + ", " + green + ", " + blue + ")");
-        
-        // Create the LED command
-        byte[] command = createSetLEDCommand(red, green, blue);
-        
-        // Send the command
-        return bluetoothInterface.sendMessage(command);
-    }
-    
-    /**
-     * Run a motor at the specified port with the specified power
-     * 
-     * @param port the port letter (A-F)
-     * @param power the power level (-100 to 100)
-     * @return true if the command was sent successfully
-     */
-    @SimpleFunction(description = "Run a motor at the specified port with the specified power")
-    public boolean RunMotor(String port, int power) {
-        if (!isConnected) {
-            logDebug("Error: Not connected to a hub");
-            ErrorOccurred("Not connected to a hub");
-            return false;
-        }
-        
-        // Validate port letter
-        if (port == null || port.isEmpty() || !port.matches("[A-Fa-f]")) {
-            logDebug("Error: Invalid port letter: " + port);
-            ErrorOccurred("Invalid port letter: " + port + ". Must be A-F.");
-            return false;
-        }
-        
-        // Validate power level
-        if (power < -100 || power > 100) {
-            logDebug("Error: Invalid power level: " + power);
-            ErrorOccurred("Invalid power level: " + power + ". Must be between -100 and 100.");
-            return false;
-        }
-        
-        // Convert port letter to port number
-        int portNumber = convertPortLetterToNumber(port.toUpperCase());
-        
-        logDebug("Running motor at port " + port + " (" + portNumber + ") with power " + power);
-        
-        // Create the motor command
-        byte[] command = createMotorPowerCommand(portNumber, power);
-        
-        // Send the command
-        return bluetoothInterface.sendMessage(command);
-    }
-    
-    /**
-     * Stop a motor at the specified port
-     * 
-     * @param port the port letter (A-F)
-     * @return true if the command was sent successfully
-     */
-    @SimpleFunction(description = "Stop a motor at the specified port")
-    public boolean StopMotor(String port) {
-        return RunMotor(port, 0);
-    }
-    
-    /**
-     * Internal method to check a BLE device at a specific index and track seen addresses
-     * @param bleIndex The BLE device index (1-based)
-     * @param seenAddresses Set to track addresses seen in this scan
-     * @return The device address if it's a LEGO hub, null otherwise
-     */
-    private String checkBLEDeviceAtIndex(int bleIndex, Set<String> seenAddresses) {
-        if (bluetoothLE == null) {
-            logDebug("Error: BluetoothLE component not set");
-            return null;
-        }
-        
-        try {
-            // Get the device name at the given BLE index
-            java.lang.reflect.Method getDeviceNameMethod = 
-                bluetoothLE.getClass().getMethod("FoundDeviceName", int.class);
-            String deviceName = (String) getDeviceNameMethod.invoke(bluetoothLE, bleIndex);
-            
-            // Get the device address at the given BLE index
-            java.lang.reflect.Method getDeviceAddressMethod = 
-                bluetoothLE.getClass().getMethod("FoundDeviceAddress", int.class);
-            String deviceAddress = (String) getDeviceAddressMethod.invoke(bluetoothLE, bleIndex);
-            
-            // Get the device RSSI at the given BLE index
-            java.lang.reflect.Method getDeviceRssiMethod = 
-                bluetoothLE.getClass().getMethod("FoundDeviceRssi", int.class);
-            Integer deviceRssi = (Integer) getDeviceRssiMethod.invoke(bluetoothLE, bleIndex);
-            
-            logDebug("Checking BLE device at index " + bleIndex + ": " + deviceName + " (" + deviceAddress + ")");
-            
-            // Check if the device name indicates a LEGO SPIKE Prime hub
-            boolean isLegoHub = isLegoSpikeHub(deviceName);
-            
-            if (isLegoHub) {
-                logDebug("LEGO SPIKE Prime hub found: " + deviceName);
-                
-                // Mark this address as seen in this scan
-                seenAddresses.add(deviceAddress);
-                
-                // Check if the hub is already in our list
-                boolean alreadyAdded = false;
-                for (LegoHub hub : legoHubs) {
-                    if (hub.getAddress().equals(deviceAddress)) {
-                        alreadyAdded = true;
-                        // Update the BLE index in case it changed
-                        hub.bleIndex = bleIndex;
-                        // Update RSSI and check for staleness
-                        boolean rssiChanged = hub.updateRssi(deviceRssi);
-                        if (rssiChanged) {
-                            logDebug("RSSI updated for hub " + deviceName + ": " + deviceRssi);
-                            // Only update timestamp when RSSI changes (indicating fresh detection)
-                            hub.updateLastSeen();
-                            logDebug("Timestamp updated for hub " + deviceName + " (RSSI changed)");
-                        }
-                        break;
-                    }
+            java.lang.reflect.Method writeBytes =
+                bluetoothLE.getClass().getMethod(
+                    "WriteBytes", String.class, String.class, boolean.class, YailList.class);
+
+            for (int offset = 0; offset < framedMessage.length; offset += maxPacketSize) {
+                int end = Math.min(offset + maxPacketSize, framedMessage.length);
+                Object[] values = new Object[end - offset];
+                for (int i = offset; i < end; i++) {
+                    values[i - offset] = framedMessage[i] & 0xFF;
                 }
-                
-                if (!alreadyAdded) {
-                    // Check if device should be hidden due to RSSI staleness
-                    // For new devices, always add them (they start visible)
-                    LegoHub newHub = new LegoHub(deviceName, deviceAddress, bleIndex);
-                    newHub.updateRssi(deviceRssi); // Set initial RSSI
-                    legoHubs.add(newHub);
-                    logDebug("Added new LEGO hub: " + deviceName + " at address " + deviceAddress + " with RSSI " + deviceRssi);
-                }
-                
-                return deviceAddress;
-            } else {
-                logDebug("Device is not a LEGO SPIKE Prime hub: " + deviceName);
-                return null;
+                YailList packet = YailList.makeList(values);
+                writeBytes.invoke(bluetoothLE, SPIKE_SERVICE_UUID, RX_CHAR_UUID,
+                    false /*unsigned*/, packet);
+                logDebug("  wrote packet [" + offset + ".." + (end-1) + "]");
             }
-            
         } catch (Exception e) {
-            logDebug("Error checking device at index " + bleIndex + ": " + e);
-            return null;
+            logDebug("sendFramedMessage error: " + e);
+            ErrorOccurred("Send error: " + e.getMessage());
         }
     }
-    
+
+    // =========================================================================
+    // Inbound — frame buffer and detection
+    // =========================================================================
+
     /**
-     * Test method to directly trigger the HubListChanged event
-     * This is useful for testing the event chain without actual device discovery
+     * Call this from App Inventor blocks when the BluetoothLE BytesReceived
+     * event fires, wired to the TX characteristic.
+     * Accumulates bytes and extracts complete SPIKE Prime frames (0x01 … 0x02).
+     *
+     * @param serviceUuid     should equal SPIKE_SERVICE_UUID
+     * @param characteristicUuid should equal TX_CHAR_UUID
+     * @param byteValues      unsigned byte values from the BLE notification
      */
-    @SimpleFunction(description = "Test method to directly trigger the HubListChanged event")
-    public void TestTriggerHubListChanged() {
-        logDebug("Directly triggering HubListChanged event with test data");
-        HubListChanged("TestHub", "", "", "TestHub");
-    }
-    
-    /**
-     * Helper method to build a comma-separated string from a list of LegoHub objects
-     * @param hubs List of LegoHub objects
-     * @return Comma-separated string of hub names
-     */
-    private String buildHubListString(List<LegoHub> hubs) {
-        if (hubs == null || hubs.isEmpty()) {
-            return "";
+    @SimpleFunction(description =
+        "Feed bytes from BluetoothLE.BytesReceived into the SPIKE Prime frame buffer. "
+        + "Wire BluetoothLE's BytesReceived event to this method.")
+    public void OnBytesReceivedFromHub(String serviceUuid,
+                                       String characteristicUuid,
+                                       YailList byteValues) {
+        // Only handle bytes from the TX characteristic
+        if (!TX_CHAR_UUID.equalsIgnoreCase(characteristicUuid)) return;
+
+        // Append incoming bytes to the receive buffer
+        for (Object item : byteValues.toArray()) {
+            try {
+                receiveBuffer.add((byte)(Integer.parseInt(item.toString()) & 0xFF));
+            } catch (NumberFormatException ignored) { /* skip malformed entry */ }
         }
-        
+        processReceiveBuffer();
+    }
+
+    /**
+     * Also accepts the raw byte-list form that some BLE extension versions fire.
+     * Delegates to OnBytesReceivedFromHub after normalising arguments.
+     */
+    public void BluetoothLE_BytesReceived(String serviceUuid,
+                                          String characteristicUuid,
+                                          YailList byteValues) {
+        OnBytesReceivedFromHub(serviceUuid, characteristicUuid, byteValues);
+    }
+
+    /**
+     * Scan receiveBuffer for complete SPIKE Prime frames.
+     * A frame starts with 0x01 and ends with the first 0x02 seen after that.
+     * Bytes appearing before the first 0x01 are discarded (protocol garbage).
+     */
+    private void processReceiveBuffer() {
+        while (true) {
+            // CLAUDE.md Rule 3: safe iteration, no index out-of-bounds
+            if (receiveBuffer.isEmpty()) break;
+
+            // Skip leading bytes that are not 0x01 (frame start)
+            if ((receiveBuffer.get(0) & 0xFF) != 0x01) {
+                receiveBuffer.remove(0);
+                continue;
+            }
+
+            // Search for 0x02 (frame end) starting at index 1
+            int endIdx = -1;
+            for (int i = 1; i < receiveBuffer.size(); i++) {
+                if ((receiveBuffer.get(i) & 0xFF) == 0x02) { endIdx = i; break; }
+            }
+
+            if (endIdx == -1) break; // Incomplete frame — wait for more bytes
+
+            // Extract the complete frame [0 .. endIdx]
+            byte[] frame = new byte[endIdx + 1];
+            for (int i = 0; i <= endIdx; i++) frame[i] = receiveBuffer.get(i);
+            // Remove consumed bytes
+            for (int i = 0; i <= endIdx; i++) receiveBuffer.remove(0);
+
+            handleCompleteFrame(frame);
+        }
+    }
+
+    /**
+     * Decode a complete received frame and dispatch the raw message.
+     * Future phases will parse message IDs here (InfoResponse, TunnelMessage, etc.).
+     */
+    private void handleCompleteFrame(byte[] frame) {
+        try {
+            byte[] raw = MessageFramer.unpack(frame);
+            if (raw == null || raw.length == 0) {
+                logDebug("handleCompleteFrame: empty after unpack");
+                return;
+            }
+            int msgId = raw[0] & 0xFF;
+            logDebug("Received frame, msgId=0x" + String.format("%02X", msgId)
+                + " rawLen=" + raw.length);
+            // Phase 2 will route by msgId (InfoResponse 0x01, TunnelMessage 0x32, etc.)
+        } catch (Exception e) {
+            logDebug("handleCompleteFrame error: " + e);
+        }
+    }
+
+    // =========================================================================
+    // BLE event callbacks (called by App Inventor event dispatch or by user blocks)
+    // =========================================================================
+
+    /** BluetoothLE DeviceFound callback — update hub list, fire HubFound. */
+    public void BluetoothLE_DeviceFound(String name, String address, int rssi) {
+        // CLAUDE.md Rule 3: null-check address before any list access
+        if (address == null) return;
+        logDebug("DeviceFound: " + name + " (" + address + ") rssi=" + rssi);
+        if (!isLegoSpikeHub(name)) return;
+
+        boolean found = false;
+        for (LegoHub h : legoHubs) {
+            if (address.equals(h.getAddress())) { h.updateLastSeen(); found = true; break; }
+        }
+        if (!found) {
+            LegoHub hub = new LegoHub(name != null ? name : "SPIKE Hub", address, -1);
+            legoHubs.add(hub);
+            final String n = hub.getName(), a = address;
+            mainHandler.post(() -> HubFound(n, a));
+        }
+    }
+
+    public void BluetoothLE_ScanningStateChanged(boolean scanning) {
+        isScanning = scanning;
+        if (scanning) ScanningStarted(); else ScanningStopped();
+    }
+
+    /** BluetoothLE Connected callback — sets state and subscribes to TX. */
+    public void BluetoothLE_Connected(String address) {
+        // CLAUDE.md Rule 3: null-check address
+        if (address == null) { logDebug("BluetoothLE_Connected: null address, ignoring"); return; }
+        logDebug("BluetoothLE_Connected: " + address);
+
+        String name = "SPIKE Hub";
+        for (LegoHub h : legoHubs) {
+            if (address.equals(h.getAddress())) { name = h.getName(); break; }
+        }
+        onConnected(name, address);
+    }
+
+    public void BluetoothLE_Disconnected() {
+        logDebug("BluetoothLE_Disconnected");
+        onDisconnected();
+    }
+
+    // =========================================================================
+    // Connection state transitions
+    // =========================================================================
+
+    /** Called after GATT connection is established. Subscribes to TX characteristic. */
+    public void onConnected(String deviceName, String deviceAddress) {
+        isConnected           = true;
+        connectedDeviceName   = deviceName;
+        connectedDeviceAddress = deviceAddress;
+        receiveBuffer.clear(); // discard stale bytes from any previous session
+
+        logDebug("onConnected: " + deviceName + " (" + deviceAddress + ")");
+
+        // Subscribe to hub's TX characteristic so we receive notifications
+        registerForTXNotifications();
+
+        // Fire events on main thread
+        final String n = deviceName, a = deviceAddress;
+        mainHandler.post(() -> {
+            Connected(n, a);
+            HubConnected(n, a); // legacy alias kept for existing block users
+        });
+    }
+
+    /** Called after GATT connection is lost. */
+    public void onDisconnected() {
+        isConnected = false;
+        final String n = connectedDeviceName, a = connectedDeviceAddress;
+        connectedDeviceName    = "";
+        connectedDeviceAddress = "";
+        receiveBuffer.clear();
+        logDebug("onDisconnected: " + n);
+
+        // CLAUDE.md Rule 4: resume scanning if we were scanning before connecting
+        if (wasScanningBeforeConnection) {
+            wasScanningBeforeConnection = false;
+            isScanning = true;
+            startScanTimer();
+            ScanningStarted();
+        }
+
+        mainHandler.post(() -> {
+            Disconnected();
+            HubDisconnected(); // legacy alias
+        });
+    }
+
+    // =========================================================================
+    // App Inventor events
+    // =========================================================================
+
+    /** Fired when scanning starts. */
+    @SimpleEvent(description = "Fired when BLE scanning starts")
+    public void ScanningStarted() {
+        mainHandler.post(() ->
+            EventDispatcher.dispatchEvent(LegoSpikePrime.this, "ScanningStarted"));
+    }
+
+    /** Fired when scanning stops. */
+    @SimpleEvent(description = "Fired when BLE scanning stops")
+    public void ScanningStopped() {
+        mainHandler.post(() ->
+            EventDispatcher.dispatchEvent(LegoSpikePrime.this, "ScanningStopped"));
+    }
+
+    /**
+     * Fired when a new LEGO SPIKE Prime hub is discovered during scanning.
+     *
+     * @param deviceName    advertised BLE device name
+     * @param deviceAddress BLE MAC address
+     */
+    @SimpleEvent(description = "Fired when a LEGO SPIKE Prime hub is discovered during scanning")
+    public void HubFound(String deviceName, String deviceAddress) {
+        logDebug("HubFound: " + deviceName + " (" + deviceAddress + ")");
+        EventDispatcher.dispatchEvent(this, "HubFound", deviceName, deviceAddress);
+    }
+
+    /** Fired when the visible hub list changes (new / retained / lost). */
+    @SimpleEvent(description = "Fired when the visible hub list changes")
+    public void HubListChanged(String newHubs, String retainedHubs,
+                               String lostHubs, String allCurrentHubs) {
+        logDebug("HubListChanged new=[" + newHubs + "] lost=[" + lostHubs + "]");
+        mainHandler.post(() ->
+            EventDispatcher.dispatchEvent(LegoSpikePrime.this, "HubListChanged",
+                newHubs, retainedHubs, lostHubs, allCurrentHubs));
+    }
+
+    /**
+     * Fired when successfully connected to a SPIKE Prime hub.
+     *
+     * @param deviceName    hub BLE name
+     * @param deviceAddress hub BLE address
+     */
+    @SimpleEvent(description = "Fired when the app connects to a SPIKE Prime hub")
+    public void Connected(String deviceName, String deviceAddress) {
+        logDebug("Connected: " + deviceName);
+        EventDispatcher.dispatchEvent(this, "Connected", deviceName, deviceAddress);
+    }
+
+    /** Fired when the connection to the hub is lost. */
+    @SimpleEvent(description = "Fired when the connection to the hub is lost")
+    public void Disconnected() {
+        logDebug("Disconnected");
+        EventDispatcher.dispatchEvent(this, "Disconnected");
+    }
+
+    /** Legacy alias for Connected — kept so existing block users are not broken. */
+    @SimpleEvent(description = "Fired when the app connects to a hub (legacy name)")
+    public void HubConnected(String deviceName, String deviceAddress) {
+        EventDispatcher.dispatchEvent(this, "HubConnected", deviceName, deviceAddress);
+    }
+
+    /** Legacy alias for Disconnected — kept so existing block users are not broken. */
+    @SimpleEvent(description = "Fired when the connection is lost (legacy name)")
+    public void HubDisconnected() {
+        EventDispatcher.dispatchEvent(this, "HubDisconnected");
+    }
+
+    /**
+     * Fired when an error occurs in the extension.
+     *
+     * @param errorMessage human-readable description of the error
+     */
+    @SimpleEvent(description = "Fired when an error occurs")
+    public void ErrorOccurred(String errorMessage) {
+        logDebug("ErrorOccurred: " + errorMessage);
+        EventDispatcher.dispatchEvent(this, "ErrorOccurred", errorMessage);
+    }
+
+    // =========================================================================
+    // Motor / LED — legacy direct-BLE commands.
+    // NOTE: These do NOT work with SPIKE Prime 3.x firmware (CLAUDE.md Rule 5).
+    // They are retained here only for backward compatibility.
+    // Future work: replace with TunnelMessage-based control.
+    // =========================================================================
+
+    @SimpleFunction(description = "Set hub LED colour — NOT yet functional on SPIKE Prime 3.x")
+    public boolean SetHubLEDColor(int red, int green, int blue) {
+        if (!isConnected) { ErrorOccurred("Not connected"); return false; }
+        return bluetoothInterface.sendMessage(buildSetLEDCommand(red, green, blue));
+    }
+
+    @SimpleFunction(description = "Run motor — NOT yet functional on SPIKE Prime 3.x")
+    public boolean RunMotor(String port, int power) {
+        if (!isConnected) { ErrorOccurred("Not connected"); return false; }
+        if (port == null || !port.matches("[A-Fa-f]")) {
+            ErrorOccurred("Invalid port: " + port); return false;
+        }
+        power = Math.max(-100, Math.min(100, power));
+        return bluetoothInterface.sendMessage(
+            buildMotorCommand(portLetterToNumber(port.toUpperCase()), power));
+    }
+
+    @SimpleFunction(description = "Stop motor — NOT yet functional on SPIKE Prime 3.x")
+    public boolean StopMotor(String port) { return RunMotor(port, 0); }
+
+    // =========================================================================
+    // Private helpers
+    // =========================================================================
+
+    private void logDebug(String msg) { if (debugMode) Log.d(LOG_TAG, msg); }
+
+    private boolean isLegoSpikeHub(String name) {
+        if (name == null || name.isEmpty()) return false;
+        if (name.equalsIgnoreCase(customDeviceName)) return true;
+        for (String n : LEGO_HUB_NAMES) { if (name.equals(n)) return true; }
+        String lower = name.toLowerCase();
+        return lower.contains("lego") || lower.contains("spike") || lower.contains("hub");
+    }
+
+    private List<LegoHub> getVisibleHubs() {
+        List<LegoHub> v = new ArrayList<>();
+        for (LegoHub h : legoHubs) { if (h.isVisible()) v.add(h); }
+        return v;
+    }
+
+    private List<LegoHub> visibleFrom(List<LegoHub> list) {
+        List<LegoHub> v = new ArrayList<>();
+        for (LegoHub h : list) { if (h.isVisible()) v.add(h); }
+        return v;
+    }
+
+    private String hubNames(List<LegoHub> hubs) {
         StringBuilder sb = new StringBuilder();
         for (int i = 0; i < hubs.size(); i++) {
-            LegoHub hub = hubs.get(i);
-            sb.append(hub.getName());
-            if (i < hubs.size() - 1) {
-                sb.append(",");
-            }
+            if (i > 0) sb.append(',');
+            sb.append(hubs.get(i).getName());
         }
         return sb.toString();
     }
-    
-    /**
-     * Helper method to build a comma-separated string of lost hubs
-     * @param oldHubs Previous hub list
-     * @param currentHubs Current hub list
-     * @return Comma-separated string of lost hub names
-     */
-    private String buildLostHubsString(List<LegoHub> oldHubs, List<LegoHub> currentHubs) {
-        if (oldHubs == null || oldHubs.isEmpty()) {
-            return "";
-        }
-        
-        List<LegoHub> lostHubs = new ArrayList<>();
-        for (LegoHub oldHub : oldHubs) {
-            boolean stillPresent = false;
-            for (LegoHub currentHub : currentHubs) {
-                if (oldHub.getAddress().equals(currentHub.getAddress())) {
-                    stillPresent = true;
-                    break;
-                }
-            }
-            if (!stillPresent) {
-                lostHubs.add(oldHub);
-            }
-        }
-        
-        return buildHubListString(lostHubs);
-    }
-    
-    /**
-     * Test method to directly trigger the HubConnected event
-     * This is useful for testing the event chain without actual connection
-     */
-    @SimpleFunction(description = "Test method to directly trigger the HubConnected event")
-    public void TestTriggerHubConnected() {
-        logDebug("Directly triggering HubConnected event with test data");
-        onConnected("Test LEGO Hub", "00:00:00:00:00:00");
-    }
-    
-    /**
-     * Test method to directly trigger the HubDisconnected event
-     * This is useful for testing the event chain without actual disconnection
-     */
-    @SimpleFunction(description = "Test method to directly trigger the HubDisconnected event")
-    public void TestTriggerHubDisconnected() {
-        logDebug("Directly triggering HubDisconnected event");
-        onDisconnected();
-    }
-    
-    /**
-     * Check if a device name indicates a LEGO SPIKE Prime hub
-     * 
-     * @param deviceName the name of the device
-     * @return true if the device name indicates a LEGO SPIKE Prime hub
-     */
-    private boolean isLegoSpikeHub(String deviceName) {
-        if (deviceName == null || deviceName.isEmpty()) {
-            return false;
-        }
-        
-        // First check if the device name matches the custom device name (case insensitive)
-        if (deviceName.equalsIgnoreCase(customDeviceName)) {
-            logDebug("Device matched custom device name: " + customDeviceName);
-            return true;
-        }
-        
-        // If no match with custom name, check for exact match with known LEGO hub names
-        for (String hubName : LEGO_HUB_NAMES) {
-            if (deviceName.equals(hubName)) {
-                logDebug("Device matched known LEGO hub name: " + hubName);
-                return true;
-            }
-        }
-        
-        // If no exact match, check for partial match with common LEGO identifiers
-        String lowerName = deviceName.toLowerCase();
-        if (lowerName.contains("lego") || 
-            lowerName.contains("spike") || 
-            lowerName.contains("hub")) {
-            logDebug("Device name contains LEGO identifier: " + deviceName);
-            return true;
-        }
-        
-        return false;
-    }
-    
-    /**
-     * Convert a port letter to a port number
-     * 
-     * @param portLetter the port letter (A-F)
-     * @return the port number (0-5)
-     */
-    private int convertPortLetterToNumber(String portLetter) {
-        switch (portLetter) {
-            case "A": return 0;
-            case "B": return 1;
-            case "C": return 2;
-            case "D": return 3;
-            case "E": return 4;
-            case "F": return 5;
+
+    private int portLetterToNumber(String p) {
+        switch (p) {
+            case "A": return 0; case "B": return 1; case "C": return 2;
+            case "D": return 3; case "E": return 4; case "F": return 5;
             default: return 0;
         }
     }
-    
-    /**
-     * Create a command to set the LED color
-     * 
-     * @param red the red component (0-255)
-     * @param green the green component (0-255)
-     * @param blue the blue component (0-255)
-     * @return the command bytes
-     */
-    private byte[] createSetLEDCommand(int red, int green, int blue) {
-        // Clamp RGB values to 0-255
-        red = Math.max(0, Math.min(255, red));
-        green = Math.max(0, Math.min(255, green));
-        blue = Math.max(0, Math.min(255, blue));
-        
-        // Create the command
-        byte[] command = new byte[8];
-        command[0] = 0x0A; // Port Output Command
-        command[1] = 0x00; // Hub ID (always 0)
-        command[2] = 0x32; // Port 50 (LED)
-        command[3] = 0x00; // Startup and completion information
-        command[4] = 0x01; // Subcommand: Set RGB
-        command[5] = (byte) red;
-        command[6] = (byte) green;
-        command[7] = (byte) blue;
-        
-        return command;
-    }
-    
-    /**
-     * Create a command to set motor power
-     * 
-     * @param port the port number (0-5)
-     * @param power the power level (-100 to 100)
-     * @return the command bytes
-     */
-    private byte[] createMotorPowerCommand(int port, int power) {
-        // Clamp power to -100 to 100
-        power = Math.max(-100, Math.min(100, power));
-        
-        // Create the command
-        byte[] command = new byte[6];
-        command[0] = 0x0A; // Port Output Command
-        command[1] = 0x00; // Hub ID (always 0)
-        command[2] = (byte) port; // Port number
-        command[3] = 0x00; // Startup and completion information
-        command[4] = 0x01; // Subcommand: Set Power
-        command[5] = (byte) power; // Power level
-        
-        return command;
-    }
-    
-    /**
-     * Called when a hub is connected
-     * 
-     * @param deviceName the name of the hub
-     * @param deviceAddress the address of the hub
-     */
-    public void onConnected(String deviceName, String deviceAddress) {
-        logDebug("onConnected called: " + deviceName + " (" + deviceAddress + ")");
-        
-        // Set connection state
-        isConnected = true;
-        connectedDeviceAddress = deviceAddress;
-        connectedDeviceName = deviceName;
-        
-        // Trigger the HubConnected event
-        HubConnected(deviceName, deviceAddress);
-    }
-    
-    /**
-     * Called when a hub is disconnected
-     */
-    public void onDisconnected() {
-        logDebug("onDisconnected called");
-        
-        // Reset connection state
-        isConnected = false;
-        String deviceName = connectedDeviceName;
-        String deviceAddress = connectedDeviceAddress;
-        connectedDeviceName = "";
-        connectedDeviceAddress = "";
-        
-        // Restart scanning if we were scanning before connection
-        if (wasScanningBeforeConnection) {
-            logDebug("Restarting scanning after disconnection");
-            isScanning = true;        // Update scanning state
-            startScanTimer();
-            ScanningStarted();        // Trigger ScanningStarted event
-            wasScanningBeforeConnection = false; // Reset flag
-        }
-        
-        // Trigger the HubDisconnected event
-        HubDisconnected();
+
+    private byte[] buildSetLEDCommand(int r, int g, int b) {
+        r = Math.max(0, Math.min(255, r));
+        g = Math.max(0, Math.min(255, g));
+        b = Math.max(0, Math.min(255, b));
+        return new byte[]{0x0A, 0x00, 0x32, 0x00, 0x01, (byte)r, (byte)g, (byte)b};
     }
 
-
-    
-    /**
-     * Event handler for BluetoothLE DeviceFound event
-     * 
-     * @param name the name of the device
-     * @param address the address of the device
-     * @param rssi the RSSI value of the device
-     */
-    public void BluetoothLE_DeviceFound(String name, String address, int rssi) {
-        logDebug("BluetoothLE_DeviceFound: " + name + " (" + address + ") RSSI: " + rssi);
-        
-        // Check if this is a LEGO SPIKE Prime hub
-        if (isLegoSpikeHub(name)) {
-            logDebug("LEGO SPIKE Prime hub found via BLE event: " + name);
-            
-            // Check if the hub is already in our list
-            boolean alreadyAdded = false;
-            for (LegoHub hub : legoHubs) {
-                if (hub.getAddress().equals(address)) {
-                    alreadyAdded = true;
-                    // Update timestamp for existing hub (this is the ONLY place timestamps should be updated)
-                    hub.updateLastSeen();
-                    logDebug("Updated timestamp for existing hub: " + name);
-                    break;
-                }
-            }
-            
-            if (!alreadyAdded) {
-                // Create a new hub object (timestamp is automatically set in constructor)
-                LegoHub newHub = new LegoHub(name, address, -1); // We don't have the index here
-                // Add the hub to our list
-                legoHubs.add(newHub);
-                logDebug("Added new hub via BLE event: " + name);
-                // Note: HubChanged event will be triggered by CheckAllDevices method
-            }
-        }
-    }
-    
-    /**
-     * Event handler for BluetoothLE ScanningStateChanged event
-     * 
-     * @param scanning whether scanning is active
-     */
-    public void BluetoothLE_ScanningStateChanged(boolean scanning) {
-        logDebug("BluetoothLE_ScanningStateChanged: " + scanning);
-        
-        // Update our scanning state
-        isScanning = scanning;
-        
-        // Trigger the appropriate event
-        if (scanning) {
-            ScanningStarted();
-        } else {
-            ScanningStopped();
-        }
-    }
-    
-    /**
-     * Event handler for BluetoothLE Connected event
-     * 
-     * @param address the address of the connected device
-     */
-    public void BluetoothLE_Connected(String address) {
-        logDebug("BluetoothLE_Connected: " + address);
-        
-        // Find the hub in our list
-        for (LegoHub hub : legoHubs) {
-            if (hub.getAddress().equals(address)) {
-                // Call our connection handler
-                onConnected(hub.getName(), address);
-                return;
-            }
-        }
-        
-        // If we get here, the connected device is not in our list
-        // This can happen if the user connects directly through the BluetoothLE component
-        logDebug("Connected to unknown device: " + address);
-        onConnected("Unknown Hub", address);
-    }
-    
-    /**
-     * Event handler for BluetoothLE Disconnected event
-     */
-    public void BluetoothLE_Disconnected() {
-        logDebug("BluetoothLE_Disconnected");
-        
-        // Call our disconnection handler
-        onDisconnected();
-    }
-    
-    /**
-     * Event triggered when scanning for LEGO SPIKE Prime hubs starts
-     */
-    @SimpleEvent(description = "Event triggered when scanning for LEGO SPIKE Prime hubs starts")
-    public void ScanningStarted() {
-        logDebug("ScanningStarted event triggered");
-        
-        // Use Handler to dispatch event on main thread
-        mainHandler.post(new Runnable() {
-            @Override
-            public void run() {
-                try {
-                    EventDispatcher.dispatchEvent(LegoSpikePrime.this, "ScanningStarted");
-                    logDebug("ScanningStarted event dispatched successfully");
-                } catch (Exception e) {
-                    logDebug("Error dispatching ScanningStarted event: " + e);
-                    e.printStackTrace();
-                }
-            }
-        });
-    }
-    
-    /**
-     * Event triggered when scanning for LEGO SPIKE Prime hubs stops
-     */
-    @SimpleEvent(description = "Event triggered when scanning for LEGO SPIKE Prime hubs stops")
-    public void ScanningStopped() {
-        logDebug("ScanningStopped event triggered");
-        
-        // Use Handler to dispatch event on main thread
-        mainHandler.post(new Runnable() {
-            @Override
-            public void run() {
-                try {
-                    EventDispatcher.dispatchEvent(LegoSpikePrime.this, "ScanningStopped");
-                    logDebug("ScanningStopped event dispatched successfully");
-                } catch (Exception e) {
-                    logDebug("Error dispatching ScanningStopped event: " + e);
-                    e.printStackTrace();
-                }
-            }
-        });
-    }
-       /**
-     * Event triggered when the list of detected LEGO SPIKE Prime hubs changes
-     * 
-     * @param newHubs comma-separated list of hub names that were newly detected
-     * @param retainedHubs comma-separated list of hub names that remained from previous scan
-     * @param lostHubs comma-separated list of hub names that were lost
-     * @param allCurrentHubs comma-separated list of all currently detected hub names
-     */
-    @SimpleEvent(description = "Event triggered when the list of detected LEGO SPIKE Prime hubs changes")
-    public void HubListChanged(String newHubs, String retainedHubs, String lostHubs, String allCurrentHubs) {
-        logDebug("HubListChanged event triggered: new=[" + newHubs + "], retained=[" + retainedHubs + "], lost=[" + lostHubs + "], total=" + GetLegoHubCount());
-        
-        // Use Handler to dispatch event on main thread
-        mainHandler.post(new Runnable() {
-            @Override
-            public void run() {
-                try {
-                    EventDispatcher.dispatchEvent(LegoSpikePrime.this, "HubListChanged", newHubs, retainedHubs, lostHubs, allCurrentHubs);
-                    logDebug("HubListChanged event dispatched successfully");
-                } catch (Exception e) {
-                    logDebug("Error dispatching HubListChanged event: " + e);
-                    e.printStackTrace();
-                }
-            }
-        });
-    }
-    
-    /**
-     * Event triggered when a LEGO SPIKE Prime hub is connected
-     * 
-     * @param deviceName the name of the hub
-     * @param deviceAddress the address of the hub
-     */
-    @SimpleEvent(description = "Event triggered when a LEGO SPIKE Prime hub is connected")
-    public void HubConnected(String deviceName, String deviceAddress) {
-        logDebug("HubConnected event triggered: " + deviceName + " (" + deviceAddress + ")");
-        
-        try {
-            EventDispatcher.dispatchEvent(this, "HubConnected", deviceName, deviceAddress);
-            logDebug("HubConnected event dispatched successfully");
-        } catch (Exception e) {
-            logDebug("Error dispatching HubConnected event: " + e);
-            e.printStackTrace();
-        }
-    }
-    
-    /**
-     * Event triggered when a LEGO SPIKE Prime hub is disconnected
-     */
-    @SimpleEvent(description = "Event triggered when a LEGO SPIKE Prime hub is disconnected")
-    public void HubDisconnected() {
-        logDebug("HubDisconnected event triggered");
-        
-        try {
-            EventDispatcher.dispatchEvent(this, "HubDisconnected");
-            logDebug("HubDisconnected event dispatched successfully");
-        } catch (Exception e) {
-            logDebug("Error dispatching HubDisconnected event: " + e);
-            e.printStackTrace();
-        }
-    }
-    
-    /**
-     * Event triggered when an error occurs
-     * 
-     * @param errorMessage the error message
-     */
-    @SimpleEvent(description = "Event triggered when an error occurs")
-    public void ErrorOccurred(String errorMessage) {
-        logDebug("ErrorOccurred event triggered: " + errorMessage);
-        
-        try {
-            EventDispatcher.dispatchEvent(this, "ErrorOccurred", errorMessage);
-            logDebug("ErrorOccurred event dispatched successfully");
-        } catch (Exception e) {
-            logDebug("Error dispatching ErrorOccurred event: " + e);
-            e.printStackTrace();
-        }
-    }
-    
-    // HELPER METHODS FOR RSSI STALENESS LOGIC
-    
-    /**
-     * Get a list of visible hubs only
-     * @return List of visible LegoHub objects
-     */
-    private List<LegoHub> getVisibleHubs() {
-        List<LegoHub> visibleHubs = new ArrayList<>();
-        for (LegoHub hub : legoHubs) {
-            if (hub.isVisible()) {
-                visibleHubs.add(hub);
-            }
-        }
-        return visibleHubs;
-    }
-    
-    /**
-     * Helper method to get visible hubs from a specific list
-     * 
-     * @param hubs the list of hubs to filter
-     * @return list of visible hubs only
-     */
-    private List<LegoHub> getVisibleHubsFromList(List<LegoHub> hubs) {
-        List<LegoHub> visibleHubs = new ArrayList<>();
-        if (hubs != null) {
-            for (LegoHub hub : hubs) {
-                if (hub.isVisible()) {
-                    visibleHubs.add(hub);
-                }
-            }
-        }
-        return visibleHubs;
-    }
-    
-    /**
-     * Get the count of visible hubs
-     * @return Number of visible hubs
-     */
-    private int getVisibleHubCount() {
-        int count = 0;
-        for (LegoHub hub : legoHubs) {
-            if (hub.isVisible()) {
-                count++;
-            }
-        }
-        return count;
-    }
-    
-    /**
-     * Build a comma-separated string from visible hubs only
-     * @param hubs List of LegoHub objects (may include hidden hubs)
-     * @return Comma-separated string of visible hub names
-     */
-    private String buildVisibleHubListString(List<LegoHub> hubs) {
-        if (hubs == null || hubs.isEmpty()) {
-            return "";
-        }
-        
-        StringBuilder sb = new StringBuilder();
-        boolean first = true;
-        for (LegoHub hub : hubs) {
-            if (hub.isVisible()) {
-                if (!first) {
-                    sb.append(",");
-                }
-                sb.append(hub.getName());
-                first = false;
-            }
-        }
-        return sb.toString();
-    }
-    
-    /**
-     * Build a comma-separated string of hubs that were visible before but not visible now
-     * @param oldHubs Previous hub list
-     * @param currentHubs Current hub list
-     * @return Comma-separated string of lost visible hub names
-     */
-    private String buildLostVisibleHubsString(List<LegoHub> oldHubs, List<LegoHub> currentHubs) {
-        List<LegoHub> lostHubs = new ArrayList<>();
-        
-        // Find hubs that were visible before
-        for (LegoHub oldHub : oldHubs) {
-            if (oldHub.isVisible()) {
-                boolean stillVisible = false;
-                // Check if still visible in current list
-                for (LegoHub currentHub : currentHubs) {
-                    if (oldHub.getAddress().equals(currentHub.getAddress()) && currentHub.isVisible()) {
-                        stillVisible = true;
-                        break;
-                    }
-                }
-                if (!stillVisible) {
-                    lostHubs.add(oldHub);
-                }
-            }
-        }
-        
-        return buildHubListString(lostHubs);
+    private byte[] buildMotorCommand(int port, int power) {
+        return new byte[]{0x0A, 0x00, (byte)port, 0x00, 0x01, (byte)power};
     }
 }
-
