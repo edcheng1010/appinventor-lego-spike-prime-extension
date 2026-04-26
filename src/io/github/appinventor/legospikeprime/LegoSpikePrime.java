@@ -28,7 +28,9 @@ import java.util.Set;
 import java.util.Timer;
 import java.util.TimerTask;
 
+import io.github.appinventor.legospike.MessageBuilder;
 import io.github.appinventor.legospike.MessageFramer;
+import io.github.appinventor.legospike.ResponseParser;
 
 /**
  * LegoSpikePrime — MIT App Inventor extension for LEGO SPIKE Prime hubs.
@@ -78,6 +80,9 @@ public class LegoSpikePrime extends AndroidNonvisibleComponent {
 
     // Effective max packet size for sendFramedMessage(); updated when InfoResponse arrives.
     private int maxPacketSize = DEFAULT_MAX_PACKET_SIZE;
+    // Effective max chunk size for program upload; updated when InfoResponse arrives.
+    // 445 is the value etomasfe hard-codes when skipping InfoRequest.
+    private int maxChunkSize  = 445;
 
     // =========================================================================
     // Receive buffer for incoming TX characteristic notifications.
@@ -653,8 +658,7 @@ public class LegoSpikePrime extends AndroidNonvisibleComponent {
     }
 
     /**
-     * Decode a complete received frame and dispatch the raw message.
-     * Future phases will parse message IDs here (InfoResponse, TunnelMessage, etc.).
+     * Decode a complete received frame and route by message ID.
      */
     private void handleCompleteFrame(byte[] frame) {
         try {
@@ -666,10 +670,34 @@ public class LegoSpikePrime extends AndroidNonvisibleComponent {
             int msgId = raw[0] & 0xFF;
             logDebug("Received frame, msgId=0x" + String.format("%02X", msgId)
                 + " rawLen=" + raw.length);
-            // Phase 2 will route by msgId (InfoResponse 0x01, TunnelMessage 0x32, etc.)
+
+            if (msgId == ResponseParser.MSG_INFO_RESPONSE) {
+                handleInfoResponse(raw);
+            }
+            // Future: TunnelMessage (0x32), status responses (0x0D, 0x11, 0x1F…), etc.
         } catch (Exception e) {
             logDebug("handleCompleteFrame error: " + e);
         }
+    }
+
+    /**
+     * Parse an InfoResponse and update maxPacketSize / maxChunkSize.
+     * Fires {@link #InfoResponseReceived} on the main thread.
+     */
+    private void handleInfoResponse(byte[] raw) {
+        ResponseParser.InfoResponse info = ResponseParser.parseInfoResponse(raw);
+        if (info == null) {
+            logDebug("handleInfoResponse: parse failed (rawLen=" + raw.length + ")");
+            return;
+        }
+        maxPacketSize = info.maxPacketSize;
+        maxChunkSize  = info.maxChunkSize;
+        logDebug("SPIKE FW: " + info.fwMajor + "." + info.fwMinor + "." + info.fwBuild
+            + "  maxPacket=" + maxPacketSize + "  maxChunk=" + maxChunkSize);
+
+        final int fm = info.fwMajor, fn = info.fwMinor, fb = info.fwBuild;
+        final int mcs = maxChunkSize, mps = maxPacketSize;
+        mainHandler.post(() -> InfoResponseReceived(fm, fn, fb, mcs, mps));
     }
 
     // =========================================================================
@@ -733,6 +761,11 @@ public class LegoSpikePrime extends AndroidNonvisibleComponent {
 
         // Subscribe to hub's TX characteristic so we receive notifications
         registerForTXNotifications();
+
+        // InfoRequest handshake — must be the first message sent after subscribing to TX
+        // so the hub's InfoResponse arrives and populates maxPacketSize / maxChunkSize.
+        logDebug("Sending InfoRequest");
+        sendFramedMessage(MessageFramer.pack(MessageBuilder.buildInfoRequest()));
 
         // Fire events on main thread
         final String n = deviceName, a = deviceAddress;
@@ -846,6 +879,31 @@ public class LegoSpikePrime extends AndroidNonvisibleComponent {
         logDebug("ErrorOccurred: " + errorMessage);
         EventDispatcher.dispatchEvent(this, "ErrorOccurred", errorMessage);
     }
+
+    /**
+     * Fired when the hub replies to the InfoRequest handshake with its capabilities.
+     * maxPacketSize and maxChunkSize are now stored and used by the extension automatically.
+     *
+     * @param fwMajor       firmware major version number
+     * @param fwMinor       firmware minor version number
+     * @param fwBuild       firmware build number
+     * @param maxChunkSize  maximum bytes per TransferChunkRequest payload
+     * @param maxPacketSize maximum bytes per BLE write-without-response packet
+     */
+    @SimpleEvent(description =
+        "Fired after connecting when the hub returns its firmware version and BLE capabilities")
+    public void InfoResponseReceived(int fwMajor, int fwMinor, int fwBuild,
+                                     int maxChunkSize, int maxPacketSize) {
+        logDebug("InfoResponseReceived: FW=" + fwMajor + "." + fwMinor + "." + fwBuild
+            + " maxChunk=" + maxChunkSize + " maxPacket=" + maxPacketSize);
+        EventDispatcher.dispatchEvent(this, "InfoResponseReceived",
+            fwMajor, fwMinor, fwBuild, maxChunkSize, maxPacketSize);
+    }
+
+    /** Maximum chunk size received from the hub's InfoResponse (default 445). */
+    @SimpleProperty(category = PropertyCategory.BEHAVIOR,
+        description = "Max program chunk size reported by InfoResponse (default 445)")
+    public int MaxChunkSize() { return maxChunkSize; }
 
     // =========================================================================
     // Motor / LED — legacy direct-BLE commands.
