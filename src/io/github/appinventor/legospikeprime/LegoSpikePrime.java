@@ -94,7 +94,7 @@ public class LegoSpikePrime extends AndroidNonvisibleComponent {
         "    while i + 5 <= len(data):\n" +
         "        p, s, n = data[i], data[i + 1], data[i + 2:i + 5]\n" +
         "        if p in PORTS and s in ('+', '-') and n.isdigit():\n" +
-        "            motor.run(PORTS[p], int(s + n) * 10)\n" +
+        "            motor.run(PORTS[p], int(s + n) * 11)\n" +
         "        i += 5\n" +
         "    tunnel.send(b'rdy')\n" +
         "tunnel.callback(on_message)\n" +

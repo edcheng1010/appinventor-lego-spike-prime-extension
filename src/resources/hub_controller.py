@@ -21,7 +21,7 @@ def on_message(data):
     while i + 5 <= len(data):
         p, s, n = data[i], data[i + 1], data[i + 2:i + 5]
         if p in PORTS and s in ('+', '-') and n.isdigit():
-            motor.run(PORTS[p], int(s + n) * 10)
+            motor.run(PORTS[p], int(s + n) * 11)
         i += 5
     tunnel.send(b'rdy')
 
