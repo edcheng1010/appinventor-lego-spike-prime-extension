@@ -77,25 +77,34 @@ public class LegoSpikePrime extends AndroidNonvisibleComponent {
      * Sourced from src/resources/hub_controller.py.
      * Receives TunnelMessage payloads, drives motors via hub.port.X.motor.run(speed).
      */
-    // Production hub controller. Lights centre LED on start. Receives TunnelMessage
-    // motor commands in 5-char chunks {port A-F}{+|-}{NNN}, runs motor at NNN×10 deg/s,
-    // acknowledges each command with tunnel.send(b'rdy').
+    // Phase 1 hub controller — single motor + motor_pair drive commands.
+    // PAIR:A:B  FWD/BWD/LFT/RGT:NNN  STP  |  A+050 (single motor)
     private static final String HUB_CONTROLLER_PROGRAM =
         "from hub import light_matrix, port\n" +
-        "import hub\n" +
-        "import motor\n" +
+        "import hub, motor, motor_pair\n" +
         "light_matrix.set_pixel(2, 2, 100)\n" +
         "tunnel = hub.config['module_tunnel']\n" +
         "PORTS = {'A': port.A, 'B': port.B, 'C': port.C, 'D': port.D, 'E': port.E, 'F': port.F}\n" +
+        "motor_pair.pair(motor_pair.PAIR_1, port.A, port.B)\n" +
         "def on_message(data):\n" +
         "    if not isinstance(data, str):\n" +
         "        data = ''.join(chr(b) for b in data)\n" +
-        "    i = 0\n" +
-        "    while i + 5 <= len(data):\n" +
-        "        p, s, n = data[i], data[i + 1], data[i + 2:i + 5]\n" +
-        "        if p in PORTS and s in ('+', '-') and n.isdigit():\n" +
-        "            motor.run(PORTS[p], int(s + n) * 11)\n" +
-        "        i += 5\n" +
+        "    if data.startswith('PAIR:') and len(data) == 8 and data[5] in PORTS and data[7] in PORTS:\n" +
+        "        motor_pair.pair(motor_pair.PAIR_1, PORTS[data[5]], PORTS[data[7]])\n" +
+        "    elif data.startswith('FWD:') and len(data) == 7 and data[4:7].isdigit():\n" +
+        "        motor_pair.move(motor_pair.PAIR_1, 0, velocity=int(data[4:7]) * 11)\n" +
+        "    elif data.startswith('BWD:') and len(data) == 7 and data[4:7].isdigit():\n" +
+        "        motor_pair.move(motor_pair.PAIR_1, 0, velocity=-int(data[4:7]) * 11)\n" +
+        "    elif data.startswith('LFT:') and len(data) == 7 and data[4:7].isdigit():\n" +
+        "        v = int(data[4:7]) * 11\n" +
+        "        motor_pair.move_tank(motor_pair.PAIR_1, -v, v)\n" +
+        "    elif data.startswith('RGT:') and len(data) == 7 and data[4:7].isdigit():\n" +
+        "        v = int(data[4:7]) * 11\n" +
+        "        motor_pair.move_tank(motor_pair.PAIR_1, v, -v)\n" +
+        "    elif data == 'STP':\n" +
+        "        motor_pair.stop(motor_pair.PAIR_1)\n" +
+        "    elif len(data) == 5 and data[0] in PORTS and data[1] in ('+', '-') and data[2:5].isdigit():\n" +
+        "        motor.run(PORTS[data[0]], int(data[1] + data[2:5]) * 11)\n" +
         "    tunnel.send(b'rdy')\n" +
         "tunnel.callback(on_message)\n" +
         "tunnel.send(b'rdy')\n" +
@@ -1345,6 +1354,63 @@ public class LegoSpikePrime extends AndroidNonvisibleComponent {
     @SimpleFunction(description = "Stop the motor on the given port (A-F)")
     public void StopMotor(String port) {
         RunMotor(port, 0);
+    }
+
+    // =========================================================================
+    // Phase 1 — Paired drive commands (motor_pair API)
+    // Requires hub controller uploaded via HubConnected event.
+    // Default pair is A=left, B=right — call PairMotors() to change.
+    // =========================================================================
+
+    /**
+     * Configure which ports are the left and right motors of the drivebase.
+     * Call once after HubConnected before using drive commands.
+     * Default is A = left, B = right.
+     */
+    @SimpleFunction(description =
+        "Set left and right drive motor ports (A-F). Default A=left, B=right.")
+    public void PairMotors(String leftPort, String rightPort) {
+        if (!isConnected) { ErrorOccurred("Not connected"); return; }
+        if (leftPort == null  || !leftPort.matches("[A-Fa-f]"))
+            { ErrorOccurred("Invalid left port: "  + leftPort);  return; }
+        if (rightPort == null || !rightPort.matches("[A-Fa-f]"))
+            { ErrorOccurred("Invalid right port: " + rightPort); return; }
+        SendMotorCommand("PAIR:" + leftPort.toUpperCase() + ":" + rightPort.toUpperCase());
+    }
+
+    /** Drive both motors forward at the given speed (0–100). */
+    @SimpleFunction(description = "Drive forward at the given speed (0-100)")
+    public void DriveForward(int speed) {
+        if (!isConnected) { ErrorOccurred("Not connected"); return; }
+        SendMotorCommand(String.format("FWD:%03d", Math.max(0, Math.min(100, speed))));
+    }
+
+    /** Drive both motors backward at the given speed (0–100). */
+    @SimpleFunction(description = "Drive backward at the given speed (0-100)")
+    public void DriveBackward(int speed) {
+        if (!isConnected) { ErrorOccurred("Not connected"); return; }
+        SendMotorCommand(String.format("BWD:%03d", Math.max(0, Math.min(100, speed))));
+    }
+
+    /** Tank-turn left (left motor backward, right motor forward). */
+    @SimpleFunction(description = "Turn left (tank turn) at the given speed (0-100)")
+    public void TurnLeft(int speed) {
+        if (!isConnected) { ErrorOccurred("Not connected"); return; }
+        SendMotorCommand(String.format("LFT:%03d", Math.max(0, Math.min(100, speed))));
+    }
+
+    /** Tank-turn right (left motor forward, right motor backward). */
+    @SimpleFunction(description = "Turn right (tank turn) at the given speed (0-100)")
+    public void TurnRight(int speed) {
+        if (!isConnected) { ErrorOccurred("Not connected"); return; }
+        SendMotorCommand(String.format("RGT:%03d", Math.max(0, Math.min(100, speed))));
+    }
+
+    /** Stop the paired drive motors immediately. */
+    @SimpleFunction(description = "Stop the paired drive motors")
+    public void StopAll() {
+        if (!isConnected) { ErrorOccurred("Not connected"); return; }
+        SendMotorCommand("STP");
     }
 
     // =========================================================================
