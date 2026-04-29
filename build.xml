@@ -90,6 +90,14 @@
           todir="${ai2.ext.src.dir}"
           overwrite="true"/>
 
+    <!-- Extension icon: ExternalComponentGenerator resolves iconName relative to
+         src/{packagePath}/, where packagePath = io/github/appinventor/legospikeprime.
+         The icon must therefore live at that path in the AI2 source tree. -->
+    <mkdir dir="${ai2.components.dir}/src/io/github/appinventor/legospikeprime/aiwebres"/>
+    <copy file="${src.dir}/io/github/appinventor/legospikeprime/aiwebres/legospike.png"
+          todir="${ai2.components.dir}/src/io/github/appinventor/legospikeprime/aiwebres"
+          overwrite="true"/>
+
     <echo>Sync complete.</echo>
   </target>
 
@@ -132,6 +140,20 @@
           todir="${output.dir}"
           overwrite="true"
           failonerror="true"/>
+
+    <!-- Patch the display name in component.json from the raw Java class name
+         ("LegoSpikePrime") to the user-facing name ("LEGO SPIKE Prime") that
+         appears in the App Inventor extension palette. -->
+    <property name="patch.dir" value="${output.dir}/aix_patch_tmp"/>
+    <delete dir="${patch.dir}" quiet="true"/>
+    <unzip src="${output.dir}/${ext.fqcn}.aix" dest="${patch.dir}"/>
+    <replace dir="${patch.dir}" token='"name": "LegoSpikePrime"'
+             value='"name": "LEGO SPIKE Prime"'>
+      <include name="**/component.json"/>
+      <include name="**/components.json"/>
+    </replace>
+    <zip destfile="${output.dir}/${ext.fqcn}.aix" basedir="${patch.dir}"/>
+    <delete dir="${patch.dir}" quiet="true"/>
 
     <echo>====================================================</echo>
     <echo>SUCCESS  →  ${output.dir}/${ext.fqcn}.aix</echo>
