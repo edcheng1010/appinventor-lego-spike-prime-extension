@@ -360,10 +360,6 @@ public class LegoSpikePrime extends AndroidNonvisibleComponent {
         description = "BLE address of the currently connected hub, or empty string")
     public String ConnectedDeviceAddress() { return connectedDeviceAddress; }
 
-    @SimpleProperty(category = PropertyCategory.BEHAVIOR,
-        description = "Max BLE packet size (set automatically from InfoResponse)")
-    public int MaxPacketSize() { return maxPacketSize; }
-
     // =========================================================================
     // Scanning
     // =========================================================================
@@ -415,24 +411,6 @@ public class LegoSpikePrime extends AndroidNonvisibleComponent {
         ScanningStarted();
     }
 
-    /** Start scanning without UUID filter (legacy / manual control). */
-    @SimpleFunction(description = "Start scanning for all LEGO SPIKE Prime hubs")
-    public void StartScanning() {
-        if (bluetoothLE == null) { ErrorOccurred("BluetoothLE component not set"); return; }
-        if (isScanning) StopScanning();
-
-        legoHubs.clear();
-        logDebug("StartScanning");
-        try {
-            bluetoothLE.getClass().getMethod("StartScanning").invoke(bluetoothLE);
-            isScanning = true;
-            startScanTimer();
-            ScanningStarted();
-        } catch (Exception e) {
-            ErrorOccurred("Error starting scan: " + e.getMessage());
-        }
-    }
-
     /** Stop the current BLE scan. */
     @SimpleFunction(description = "Stop scanning for LEGO SPIKE Prime hubs")
     public void StopScanning() {
@@ -463,7 +441,7 @@ public class LegoSpikePrime extends AndroidNonvisibleComponent {
      * Iterate all BLE-cached devices, update RSSI staleness, fire HubListChanged
      * when visibility changes.  CLAUDE.md Rule 2: DO NOT REMOVE this method.
      */
-    @SimpleFunction(description = "Refresh hub list using RSSI staleness detection")
+    /** Internal RSSI-staleness maintenance — called by scan timer. */
     public void CheckAllDevices() {
         if (bluetoothLE == null) return;
         try {
@@ -592,19 +570,18 @@ public class LegoSpikePrime extends AndroidNonvisibleComponent {
      */
     @SimpleFunction(description =
         "Connect to the LEGO SPIKE Prime hub at the given index (1-based)")
-    public boolean ConnectToHub(int index) {
-        if (bluetoothLE == null) { ErrorOccurred("BluetoothLE component not set"); return false; }
+    public void ConnectToHub(int index) {
+        if (bluetoothLE == null) { ErrorOccurred("BluetoothLE component not set"); return; }
 
         List<LegoHub> visible = getVisibleHubs();
         if (index < 1 || index > visible.size()) {
-            ErrorOccurred("Invalid hub index: " + index); return false;
+            ErrorOccurred("Invalid hub index: " + index); return;
         }
         if (isConnected) Disconnect();
 
-        // CLAUDE.md Rule 4: stop scanning before connecting, remember to resume.
+        // Only stop scanning if currently scanning (CLAUDE.md Rule 4).
         if (isScanning) {
             wasScanningBeforeConnection = true;
-            // Bug 2 fix: also stop the BLE adapter itself, not just our timer
             try {
                 bluetoothLE.getClass().getMethod("StopScanning").invoke(bluetoothLE);
             } catch (Exception e) {
@@ -624,16 +601,13 @@ public class LegoSpikePrime extends AndroidNonvisibleComponent {
             bluetoothLE.getClass()
                 .getMethod("ConnectWithAddress", String.class)
                 .invoke(bluetoothLE, hub.getAddress());
-            // Bug 5: start polling fallback in case the proxy listener misses the callback
             startConnectionPolling(hub.getName(), hub.getAddress());
-            return true;
         } catch (Exception e) {
             ErrorOccurred("Connect failed: " + e.getMessage());
             pendingConnectAddress = "";
             if (wasScanningBeforeConnection) {
                 isScanning = true; startScanTimer(); ScanningStarted();
             }
-            return false;
         }
     }
 
@@ -685,14 +659,73 @@ public class LegoSpikePrime extends AndroidNonvisibleComponent {
     private void registerForTXNotifications() {
         if (bluetoothLE == null) return;
         logDebug("Subscribing to TX notifications: " + TX_CHAR_UUID);
+        if (registerForBytesViaInner()) {
+            logDebug("TX notifications auto-wired via BLEResponseHandler — no BytesReceived block needed");
+            return;
+        }
+        // Fallback: public RegisterForBytes (fires BytesReceived via EventDispatcher).
+        // If this path is taken, wire BluetoothLE.BytesReceived → OnBytesReceivedFromHub.
         try {
             bluetoothLE.getClass()
                 .getMethod("RegisterForBytes", String.class, String.class, boolean.class)
                 .invoke(bluetoothLE, SPIKE_SERVICE_UUID, TX_CHAR_UUID, false);
-            logDebug("TX notification subscription OK");
+            logDebug("TX notification subscription OK (fallback — wire BytesReceived if needed)");
         } catch (Exception e) {
             logDebug("RegisterForBytes failed: " + e.getMessage());
             ErrorOccurred("TX subscription failed: " + e.getMessage());
+        }
+    }
+
+    /**
+     * Registers directly on BluetoothLEint.inner's BLEResponseHandler, bypassing
+     * EventDispatcher entirely so no user BytesReceived block wiring is required.
+     */
+    private boolean registerForBytesViaInner() {
+        try {
+            java.lang.reflect.Field f = bluetoothLE.getClass().getDeclaredField("inner");
+            f.setAccessible(true);
+            final Object inner = f.get(bluetoothLE);
+            if (inner == null) return false;
+
+            ClassLoader cl = bluetoothLE.getClass().getClassLoader();
+            if (cl == null) cl = Thread.currentThread().getContextClassLoader();
+            Class<?> handlerClass = cl.loadClass(
+                "edu.mit.appinventor.ble.BluetoothLE$BLEResponseHandler");
+
+            Object proxy = Proxy.newProxyInstance(cl, new Class<?>[]{ handlerClass },
+                new InvocationHandler() {
+                    @Override public Object invoke(Object p,
+                            java.lang.reflect.Method m, Object[] args) {
+                        if ("onReceive".equals(m.getName())
+                                && args != null && args.length >= 3) {
+                            String charUuid = (String) args[1];
+                            if (TX_CHAR_UUID.equalsIgnoreCase(charUuid)) {
+                                java.util.List<?> vals = (java.util.List<?>) args[2];
+                                logDebug("BLE bytes (auto): " + vals.size()
+                                    + " from " + charUuid);
+                                for (Object v : vals) {
+                                    try {
+                                        receiveBuffer.add(
+                                            (byte)(((Number) v).intValue() & 0xFF));
+                                    } catch (Exception ignored) {}
+                                }
+                                logDebug("  receiveBuffer: " + receiveBuffer.size());
+                                processReceiveBuffer();
+                            }
+                        }
+                        return null;
+                    }
+                });
+
+            inner.getClass()
+                .getMethod("RegisterForByteValues",
+                    String.class, String.class, boolean.class, handlerClass)
+                .invoke(inner, SPIKE_SERVICE_UUID, TX_CHAR_UUID, false, proxy);
+            return true;
+        } catch (Exception e) {
+            logDebug("Inner BLEResponseHandler: " + e.getClass().getSimpleName()
+                + ": " + e.getMessage());
+            return false;
         }
     }
 
@@ -748,39 +781,22 @@ public class LegoSpikePrime extends AndroidNonvisibleComponent {
      * @param characteristicUuid should equal TX_CHAR_UUID
      * @param byteValues      unsigned byte values from the BLE notification
      */
-    @SimpleFunction(description =
-        "Feed bytes from BluetoothLE.BytesReceived into the SPIKE Prime frame buffer. "
-        + "Wire BluetoothLE's BytesReceived event to this method.")
+    /**
+     * Manual fallback: if auto-wiring via BLEResponseHandler failed, wire
+     * BluetoothLE.BytesReceived to this method from your App Inventor blocks.
+     * Not needed when registerForBytesViaInner() succeeds (normal case).
+     */
     public void OnBytesReceivedFromHub(String serviceUuid,
                                        String characteristicUuid,
                                        YailList byteValues) {
-        logDebug("OnBytesReceivedFromHub: " + byteValues.size()
-            + " bytes, uuid=" + characteristicUuid);
-
-        // Only handle bytes from the TX characteristic
-        if (!TX_CHAR_UUID.equalsIgnoreCase(characteristicUuid)) {
-            logDebug("  (ignored — not TX characteristic)");
-            return;
-        }
-
-        // Append incoming bytes to the receive buffer
+        if (!TX_CHAR_UUID.equalsIgnoreCase(characteristicUuid)) return;
         for (Object item : byteValues.toArray()) {
             try {
                 receiveBuffer.add((byte)(Integer.parseInt(item.toString()) & 0xFF));
-            } catch (NumberFormatException ignored) { /* skip malformed entry */ }
+            } catch (NumberFormatException ignored) {}
         }
-        logDebug("  receiveBuffer size after append: " + receiveBuffer.size());
+        logDebug("OnBytesReceivedFromHub (manual): " + byteValues.size() + " bytes");
         processReceiveBuffer();
-    }
-
-    /**
-     * Also accepts the raw byte-list form that some BLE extension versions fire.
-     * Delegates to OnBytesReceivedFromHub after normalising arguments.
-     */
-    public void BluetoothLE_BytesReceived(String serviceUuid,
-                                          String characteristicUuid,
-                                          YailList byteValues) {
-        OnBytesReceivedFromHub(serviceUuid, characteristicUuid, byteValues);
     }
 
     /**
@@ -875,10 +891,7 @@ public class LegoSpikePrime extends AndroidNonvisibleComponent {
         }
     }
 
-    /**
-     * Parse an InfoResponse and update maxPacketSize / maxChunkSize.
-     * Fires {@link #InfoResponseReceived} on the main thread.
-     */
+    /** Parse an InfoResponse and silently update maxPacketSize / maxChunkSize. */
     private void handleInfoResponse(byte[] raw) {
         ResponseParser.InfoResponse info = ResponseParser.parseInfoResponse(raw);
         if (info == null) {
@@ -889,10 +902,6 @@ public class LegoSpikePrime extends AndroidNonvisibleComponent {
         maxChunkSize  = info.maxChunkSize;
         logDebug("SPIKE FW: " + info.fwMajor + "." + info.fwMinor + "." + info.fwBuild
             + "  maxPacket=" + maxPacketSize + "  maxChunk=" + maxChunkSize);
-
-        final int fm = info.fwMajor, fn = info.fwMinor, fb = info.fwBuild;
-        final int mcs = maxChunkSize, mps = maxPacketSize;
-        mainHandler.post(() -> InfoResponseReceived(fm, fn, fb, mcs, mps));
     }
 
     /**
@@ -1047,6 +1056,10 @@ public class LegoSpikePrime extends AndroidNonvisibleComponent {
 
         final String n = deviceName, a = deviceAddress;
         mainHandler.post(() -> HubConnected(n, a));
+
+        // Auto-upload the hub controller so students don't need to call
+        // UploadController manually — HubReady fires when motors are ready.
+        UploadController();
     }
 
     /** Called when the GATT connection is lost. */
@@ -1142,36 +1155,14 @@ public class LegoSpikePrime extends AndroidNonvisibleComponent {
     }
 
     /**
-     * Fired when the hub replies to the InfoRequest handshake with its capabilities.
-     * maxPacketSize and maxChunkSize are now stored and used by the extension automatically.
-     *
-     * @param fwMajor       firmware major version number
-     * @param fwMinor       firmware minor version number
-     * @param fwBuild       firmware build number
-     * @param maxChunkSize  maximum bytes per TransferChunkRequest payload
-     * @param maxPacketSize maximum bytes per BLE write-without-response packet
+     * Fired when the hub controller is uploaded and motors are ready to use.
+     * This is the signal to enable motor control in your app.
      */
     @SimpleEvent(description =
-        "Fired after connecting when the hub returns its firmware version and BLE capabilities")
-    public void InfoResponseReceived(int fwMajor, int fwMinor, int fwBuild,
-                                     int maxChunkSize, int maxPacketSize) {
-        logDebug("InfoResponseReceived: FW=" + fwMajor + "." + fwMinor + "." + fwBuild
-            + " maxChunk=" + maxChunkSize + " maxPacket=" + maxPacketSize);
-        EventDispatcher.dispatchEvent(this, "InfoResponseReceived",
-            fwMajor, fwMinor, fwBuild, maxChunkSize, maxPacketSize);
-    }
-
-    /** Maximum chunk size received from the hub's InfoResponse (default 445). */
-    @SimpleProperty(category = PropertyCategory.BEHAVIOR,
-        description = "Max program chunk size reported by InfoResponse (default 445)")
-    public int MaxChunkSize() { return maxChunkSize; }
-
-    /** Fired when the hub controller program has been fully uploaded and started. */
-    @SimpleEvent(description =
-        "Fired when UploadController finishes uploading and starting the hub program")
-    public void ControllerUploaded() {
-        logDebug("ControllerUploaded");
-        EventDispatcher.dispatchEvent(this, "ControllerUploaded");
+        "Fired when the hub is ready — connection established and motor controller running")
+    public void HubReady() {
+        logDebug("HubReady");
+        EventDispatcher.dispatchEvent(this, "HubReady");
     }
 
     // =========================================================================
@@ -1179,13 +1170,10 @@ public class LegoSpikePrime extends AndroidNonvisibleComponent {
     // =========================================================================
 
     /**
-     * Upload the embedded hub_controller.py to slot 0 and start it.
-     * Runs on a background thread; fires {@link #ControllerUploaded()} when done.
-     * Uses the maxChunkSize from InfoResponse (or the default 445).
+     * Uploads hub_controller.py to slot 0 and starts it — called automatically
+     * from onConnected(). Fires HubReady() when motors are ready to use.
      */
-    @SimpleFunction(description =
-        "Upload the hub controller program and start it (runs in background)")
-    public void UploadController() {
+    private void UploadController() {
         if (!isConnected) { ErrorOccurred("Not connected"); return; }
         new Thread(() -> {
             try {
@@ -1235,7 +1223,7 @@ public class LegoSpikePrime extends AndroidNonvisibleComponent {
                 sendFramedMessage(up.getExecuteMessage());
                 awaitUploadResponse(5000); // wait for ProgramFlowResponse
 
-                mainHandler.post(() -> ControllerUploaded());
+                mainHandler.post(() -> HubReady());
 
             } catch (Exception e) {
                 logDebug("UploadController error: " + e);
@@ -1269,19 +1257,6 @@ public class LegoSpikePrime extends AndroidNonvisibleComponent {
         if (command == null || command.isEmpty()) { ErrorOccurred("Empty command"); return; }
         logDebug("SendMotorCommand: " + command);
         sendFramedMessage(MessageFramer.pack(MessageBuilder.buildTunnelMessage(command)));
-    }
-
-    // =========================================================================
-    // Motor / LED — legacy direct-BLE commands.
-    // NOTE: These do NOT work with SPIKE Prime 3.x firmware (CLAUDE.md Rule 5).
-    // They are retained here only for backward compatibility.
-    // Future work: replace with TunnelMessage-based control.
-    // =========================================================================
-
-    @SimpleFunction(description = "Set hub LED colour — NOT yet functional on SPIKE Prime 3.x")
-    public boolean SetHubLEDColor(int red, int green, int blue) {
-        if (!isConnected) { ErrorOccurred("Not connected"); return false; }
-        return bluetoothInterface.sendMessage(buildSetLEDCommand(red, green, blue));
     }
 
     /**
