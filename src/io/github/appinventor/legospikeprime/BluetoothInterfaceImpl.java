@@ -8,13 +8,10 @@ import android.util.Log;
  */
 public class BluetoothInterfaceImpl {
 
-    private static final String LOG_TAG = "LegoSpikePrime";
-    
-    // Reference to the BluetoothLE component
+    private static final String LOG_TAG = "LegoSpikeConnectivity";
+
     private Object bluetoothLE;
-    
-    // Reference to the LegoSpikePrime extension
-    private LegoSpikePrime extension;
+    private LegoSpikeConnectivity extension;
     
     // LEGO Wireless Protocol Service UUID
     private static final String LEGO_WIRELESS_SERVICE_UUID = "0000fd02-0000-1000-8000-00805f9b34fb";
@@ -44,16 +41,10 @@ public class BluetoothInterfaceImpl {
      */
     public void setBluetoothLE(Object bluetoothLE) {
         this.bluetoothLE = bluetoothLE;
-        // Note: TX notification subscription is handled by LegoSpikePrime.registerForTXNotifications()
-        // after GATT connection is established. Do NOT register here.
+        // TX notification subscription is handled by LegoSpikeConnectivity.registerForTXNotifications()
     }
 
-    /**
-     * Set the LegoSpikePrime extension reference
-     *
-     * @param extension the LegoSpikePrime extension
-     */
-    public void setExtension(LegoSpikePrime extension) {
+    public void setExtension(LegoSpikeConnectivity extension) {
         this.extension = extension;
         logDebug("Extension reference set");
     }

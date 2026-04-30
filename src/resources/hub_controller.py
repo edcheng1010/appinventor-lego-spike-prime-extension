@@ -1,58 +1,185 @@
-# LEGO SPIKE Prime 3.x hub controller — Phase 1 (single + paired motor drive).
+# LEGO SPIKE Prime hub controller — MVP release.
 #
 # Command protocol (all via TunnelMessage):
-#   Single motor : "A+050"          port A, +50% speed
-#   Pair config  : "PAIR:A:B"       set A=left, B=right motor for drive commands
-#   Drive forward: "FWD:050"        both motors forward at 50%
-#   Drive back   : "BWD:050"        both motors backward
-#   Turn left    : "LFT:050"        tank-turn left at 50%
-#   Turn right   : "RGT:050"        tank-turn right
-#   Stop all     : "STP"            stop paired motors
+#
+#   MTR:A:CW:050       start motor A clockwise at 50%
+#   MTR:A:STOP         stop motor A
+#
+#   MOV:PAIR:A:B       set movement pair A=left B=right
+#   MOV:FWD:050        move forward at 50%
+#   MOV:BWD:050        move backward at 50%
+#   MOV:STEER:+50:075  steer +50 (right) at speed 75%
+#   MOV:STOP           stop movement
+#
+#   LGT:ON:HAPPY       show image on 5x5 matrix
+#   LGT:OFF            turn off matrix
+#   LGT:TXT:Hello      scroll text on matrix
+#   LGT:PIX:2:2:100    set pixel (x,y) to brightness
+#   LGT:BTN:RED        set center button LED color
+#
+#   SEN:CLR:A          read color on port A  -> SEN:CLR:A:RED
+#   SEN:DST:A          read distance on port A -> SEN:DST:A:150
+#   SEN:PRS:A          read pressure on port A -> SEN:PRS:A:50
+#   SEN:ISP:A          is force sensor pressed? -> SEN:ISP:A:1
+#   SEN:TLT:PITCH      read hub tilt -> SEN:TLT:PITCH:15
+#   SEN:TMR            read timer -> SEN:TMR:3
+#   SEN:TMRR           reset timer
+
 from hub import light_matrix, port
-import hub
-import motor
-import motor_pair
+import hub, motor, motor_pair, time
+
+try:
+    import color_sensor, distance_sensor, force_sensor, color
+    _clr_map = {}
+    for _n in ('BLACK', 'RED', 'GREEN', 'YELLOW', 'BLUE', 'WHITE',
+               'CYAN', 'MAGENTA', 'ORANGE', 'VIOLET', 'AZURE', 'NONE'):
+        try:
+            _clr_map[getattr(color, _n)] = _n
+        except AttributeError:
+            pass
+    _sensors_ok = True
+except Exception:
+    _sensors_ok = False
+    _clr_map = {}
 
 light_matrix.set_pixel(2, 2, 100)   # centre LED = program running
-
 tunnel = hub.config['module_tunnel']
 
-PORTS = {'A': port.A, 'B': port.B, 'C': port.C, 'D': port.D, 'E': port.E, 'F': port.F}
+PORTS = {'A': port.A, 'B': port.B, 'C': port.C,
+         'D': port.D, 'E': port.E, 'F': port.F}
 
-# Default drive pair: A = left motor, B = right motor
-motor_pair.pair(motor_pair.PAIR_1, port.A, port.B)
+# Named image index map (hub firmware image indices)
+IMAGES = {
+    'HEART': 0, 'HEART_SMALL': 1, 'HAPPY': 2, 'SMILE': 3,
+    'SAD': 4, 'CONFUSED': 5, 'ANGRY': 6, 'ASLEEP': 7,
+    'SURPRISED': 8, 'YES': 12, 'NO': 13,
+    'ARROW_N': 16, 'ARROW_E': 18, 'ARROW_S': 20, 'ARROW_W': 22,
+}
+
+_timer_start = time.ticks_ms()
 
 
 def on_message(data):
+    global _timer_start
     if not isinstance(data, str):
         data = ''.join(chr(b) for b in data)
 
-    if data.startswith('PAIR:') and len(data) == 8:
-        lp, rp = data[5], data[7]
-        if lp in PORTS and rp in PORTS:
-            motor_pair.pair(motor_pair.PAIR_1, PORTS[lp], PORTS[rp])
+    parts = data.split(':')
+    resp = b'rdy'
 
-    elif data.startswith('FWD:') and len(data) == 7 and data[4:7].isdigit():
-        motor_pair.move(motor_pair.PAIR_1, 0, velocity=int(data[4:7]) * 11)
+    try:
+        cmd = parts[0]
 
-    elif data.startswith('BWD:') and len(data) == 7 and data[4:7].isdigit():
-        motor_pair.move(motor_pair.PAIR_1, 0, velocity=-int(data[4:7]) * 11)
+        # --- Motors ---
+        if cmd == 'MTR' and len(parts) >= 3:
+            p = parts[1].upper()
+            act = parts[2].upper()
+            if p in PORTS:
+                if act == 'STOP':
+                    motor.stop(PORTS[p])
+                elif act in ('CW', 'CCW') and len(parts) >= 4:
+                    spd = int(parts[3]) * 11
+                    if act == 'CCW':
+                        spd = -spd
+                    motor.run(PORTS[p], spd)
 
-    elif data.startswith('LFT:') and len(data) == 7 and data[4:7].isdigit():
-        v = int(data[4:7]) * 11
-        motor_pair.move_tank(motor_pair.PAIR_1, -v, v)
+        # --- Movement ---
+        elif cmd == 'MOV' and len(parts) >= 2:
+            sub = parts[1].upper()
+            if sub == 'PAIR' and len(parts) >= 4:
+                lp, rp = parts[2].upper(), parts[3].upper()
+                if lp in PORTS and rp in PORTS:
+                    motor_pair.pair(motor_pair.PAIR_1, PORTS[lp], PORTS[rp])
+            elif sub == 'FWD' and len(parts) >= 3:
+                motor_pair.move(motor_pair.PAIR_1, 0, velocity=int(parts[2]) * 11)
+            elif sub == 'BWD' and len(parts) >= 3:
+                motor_pair.move(motor_pair.PAIR_1, 0, velocity=-(int(parts[2]) * 11))
+            elif sub == 'STEER' and len(parts) >= 4:
+                # parts[2] is signed steering e.g. "+50" or "-50"
+                steering = int(parts[2])
+                spd = int(parts[3]) * 11
+                motor_pair.move(motor_pair.PAIR_1, steering, velocity=spd)
+            elif sub == 'STOP':
+                motor_pair.stop(motor_pair.PAIR_1)
 
-    elif data.startswith('RGT:') and len(data) == 7 and data[4:7].isdigit():
-        v = int(data[4:7]) * 11
-        motor_pair.move_tank(motor_pair.PAIR_1, v, -v)
+        # --- Light ---
+        elif cmd == 'LGT' and len(parts) >= 2:
+            sub = parts[1].upper()
+            if sub == 'ON' and len(parts) >= 3:
+                light_matrix.show_image(IMAGES.get(parts[2].upper(), 2))
+            elif sub == 'OFF':
+                light_matrix.off()
+            elif sub == 'TXT' and len(parts) >= 3:
+                light_matrix.write(':'.join(parts[2:]))
+            elif sub == 'PIX' and len(parts) >= 5:
+                light_matrix.set_pixel(int(parts[2]), int(parts[3]), int(parts[4]))
+            elif sub == 'BTN' and len(parts) >= 3:
+                try:
+                    hub.led(getattr(color, parts[2].upper()))
+                except Exception:
+                    pass
 
-    elif data == 'STP':
-        motor_pair.stop(motor_pair.PAIR_1)
+        # --- Sensors ---
+        elif cmd == 'SEN' and len(parts) >= 2 and _sensors_ok:
+            sub = parts[1].upper()
 
-    elif len(data) == 5 and data[0] in PORTS and data[1] in ('+', '-') and data[2:5].isdigit():
-        motor.run(PORTS[data[0]], int(data[1] + data[2:5]) * 11)
+            if sub == 'CLR' and len(parts) >= 3:
+                p = parts[2].upper()
+                if p in PORTS:
+                    try:
+                        c = color_sensor.color(PORTS[p])
+                        resp = ('SEN:CLR:' + p + ':' + _clr_map.get(c, str(c))).encode()
+                    except Exception:
+                        resp = ('SEN:CLR:' + p + ':NONE').encode()
 
-    tunnel.send(b'rdy')
+            elif sub == 'DST' and len(parts) >= 3:
+                p = parts[2].upper()
+                if p in PORTS:
+                    try:
+                        resp = ('SEN:DST:' + p + ':' +
+                                str(distance_sensor.distance(PORTS[p]))).encode()
+                    except Exception:
+                        resp = ('SEN:DST:' + p + ':-1').encode()
+
+            elif sub == 'PRS' and len(parts) >= 3:
+                p = parts[2].upper()
+                if p in PORTS:
+                    try:
+                        resp = ('SEN:PRS:' + p + ':' +
+                                str(force_sensor.force(PORTS[p]))).encode()
+                    except Exception:
+                        resp = ('SEN:PRS:' + p + ':0').encode()
+
+            elif sub == 'ISP' and len(parts) >= 3:
+                p = parts[2].upper()
+                if p in PORTS:
+                    try:
+                        pressed = force_sensor.pressed(PORTS[p])
+                        resp = ('SEN:ISP:' + p + ':' + ('1' if pressed else '0')).encode()
+                    except Exception:
+                        resp = ('SEN:ISP:' + p + ':0').encode()
+
+            elif sub == 'TLT' and len(parts) >= 3:
+                axis = parts[2].upper()
+                try:
+                    # tilt_angles() returns (pitch, roll, yaw) in decidegrees
+                    angles = hub.motion_sensor.tilt_angles()
+                    val = {'PITCH': angles[0], 'ROLL': angles[1], 'YAW': angles[2]}.get(axis, 0)
+                    resp = ('SEN:TLT:' + axis + ':' + str(val // 10)).encode()
+                except Exception:
+                    resp = ('SEN:TLT:' + axis + ':0').encode()
+
+            elif sub == 'TMR':
+                elapsed = time.ticks_diff(time.ticks_ms(), _timer_start) // 1000
+                resp = ('SEN:TMR:' + str(elapsed)).encode()
+
+            elif sub == 'TMRR':
+                _timer_start = time.ticks_ms()
+
+    except Exception:
+        resp = b'err'
+
+    tunnel.send(resp)
 
 
 tunnel.callback(on_message)
