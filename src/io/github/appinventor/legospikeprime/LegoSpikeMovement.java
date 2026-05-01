@@ -19,15 +19,14 @@ import com.google.appinventor.components.runtime.ComponentContainer;
  * LegoSpikeMovement — synchronized two-motor drivebase control.
  * Matches LEGO SPIKE Prime "Movement Blocks" category.
  *
- * MVP blocks: SetMovementMotors, SetMovementSpeed, StartMoving,
- *             StartMovingWithSteering, StopMoving.
- *
- * Dependency: set the Connectivity property to a LegoSpikeConnectivity instance.
- * Call SetMovementMotors once after HubConnected to configure the drivebase ports.
+ * Configure LeftPort, RightPort, Direction, and Speed in the Designer or
+ * via blocks, then call SetMovementMotors, StartMoving, StopMoving, etc.
+ * One LegoSpikeMovement instance controls one drivebase pair.
  */
 @SimpleObject(external = true)
-@DesignerComponent(version = 2,
+@DesignerComponent(version = 4,
     description = "Controls a two-motor drivebase on a LEGO SPIKE Prime hub. "
+        + "Set LeftPort, RightPort, and Direction, then call SetMovementMotors and StartMoving. "
         + "Set the Connectivity property to a LegoSpikeConnectivity component.",
     category = ComponentCategory.EXTENSION,
     nonVisible = true,
@@ -36,9 +35,10 @@ public class LegoSpikeMovement extends AndroidNonvisibleComponent {
 
     private LegoSpikeConnectivity connectivity;
 
-    private int    movementSpeed = 50;   // 0-100, stored locally
     private String leftPort      = "A";
     private String rightPort     = "B";
+    private String direction     = "forward";
+    private int    movementSpeed = 50;
 
     public LegoSpikeMovement(ComponentContainer container) {
         super(container.$form());
@@ -62,28 +62,75 @@ public class LegoSpikeMovement extends AndroidNonvisibleComponent {
     public Component Connectivity() { return connectivity; }
 
     // =========================================================================
-    // MVP blocks
+    // LeftPort property
+    // =========================================================================
+    @SimpleProperty(category = PropertyCategory.BEHAVIOR,
+        description = "Port (A–F) of the left motor in the drivebase")
+    @DesignerProperty(
+        editorType   = PropertyTypeConstants.PROPERTY_TYPE_CHOICES,
+        editorArgs   = {"A", "B", "C", "D", "E", "F"},
+        defaultValue = "A")
+    public void LeftPort(@Options(MotorPort.class) String value) {
+        if (value != null && value.toUpperCase().trim().matches("[A-F]")) {
+            leftPort = value.toUpperCase().trim();
+        }
+    }
+
+    @SimpleProperty(category = PropertyCategory.BEHAVIOR,
+        description = "Port (A–F) of the left motor in the drivebase")
+    public String LeftPort() { return leftPort; }
+
+    // =========================================================================
+    // RightPort property
+    // =========================================================================
+    @SimpleProperty(category = PropertyCategory.BEHAVIOR,
+        description = "Port (A–F) of the right motor in the drivebase")
+    @DesignerProperty(
+        editorType   = PropertyTypeConstants.PROPERTY_TYPE_CHOICES,
+        editorArgs   = {"A", "B", "C", "D", "E", "F"},
+        defaultValue = "B")
+    public void RightPort(@Options(MotorPort.class) String value) {
+        if (value != null && value.toUpperCase().trim().matches("[A-F]")) {
+            rightPort = value.toUpperCase().trim();
+        }
+    }
+
+    @SimpleProperty(category = PropertyCategory.BEHAVIOR,
+        description = "Port (A–F) of the right motor in the drivebase")
+    public String RightPort() { return rightPort; }
+
+    // =========================================================================
+    // Direction property
+    // =========================================================================
+    @SimpleProperty(category = PropertyCategory.BEHAVIOR,
+        description = "Movement direction: \"Forward\" or \"Backward\"")
+    @DesignerProperty(
+        editorType   = PropertyTypeConstants.PROPERTY_TYPE_CHOICES,
+        editorArgs   = {"Forward", "Backward"},
+        defaultValue = "Forward")
+    public void Direction(@Options(MovementDirection.class) String value) {
+        if ("forward".equalsIgnoreCase(value) || "backward".equalsIgnoreCase(value)) {
+            direction = value.toLowerCase();
+        }
+    }
+
+    @SimpleProperty(category = PropertyCategory.BEHAVIOR,
+        description = "Movement direction: \"Forward\" or \"Backward\"")
+    public String Direction() { return direction; }
+
+    // =========================================================================
+    // Movement blocks
     // =========================================================================
 
     /**
-     * Configure which ports are the left and right motors of the drivebase.
+     * Pair the configured LeftPort and RightPort as the drivebase motors.
      * Call once after HubConnected. Default: A = left, B = right.
-     *
-     * @param leftPort  port letter A–F for the left motor
-     * @param rightPort port letter A–F for the right motor
      */
     @SimpleFunction(description =
-        "Set the left and right motor ports of the drivebase (A-F). "
-        + "Call once after HubConnected. Default: A = left, B = right.")
-    public void SetMovementMotors(@Options(MotorPort.class) String leftPort,
-                                  @Options(MotorPort.class) String rightPort) {
+        "Pair the configured LeftPort and RightPort as the drivebase motors. "
+        + "Call once after HubConnected.")
+    public void SetMovementMotors() {
         if (!checkConnected()) return;
-        leftPort  = leftPort.toUpperCase().trim();
-        rightPort = rightPort.toUpperCase().trim();
-        if (!isValidPort(leftPort))  { reportError("Invalid left port: "  + leftPort);  return; }
-        if (!isValidPort(rightPort)) { reportError("Invalid right port: " + rightPort); return; }
-        this.leftPort  = leftPort;
-        this.rightPort = rightPort;
         connectivity.sendCommand("MOV:PAIR:" + leftPort + ":" + rightPort);
     }
 
@@ -94,33 +141,22 @@ public class LegoSpikeMovement extends AndroidNonvisibleComponent {
      * @param speed 0–100 percent
      */
     @SimpleFunction(description =
-        "Set the movement speed (0-100). Applied on the next StartMoving or "
+        "Set the movement speed (0–100). Applied on the next StartMoving or "
         + "StartMovingWithSteering call.")
     public void SetMovementSpeed(int speed) {
         movementSpeed = Math.max(0, Math.min(100, speed));
     }
 
     /**
-     * Start moving the drivebase in the given direction using the stored speed.
-     *
-     * @param direction "forward" or "backward"
+     * Start moving the drivebase using the configured Direction and speed.
      */
     @SimpleFunction(description =
-        "Start moving the drivebase. direction: \"forward\" or \"backward\". "
-        + "Uses the speed set by SetMovementSpeed.")
-    public void StartMoving(@Options(MovementDirection.class) String direction) {
+        "Start moving the drivebase using the configured Direction and speed.")
+    public void StartMoving() {
         if (!checkConnected()) return;
-        String dir = direction.toLowerCase().trim();
-        String cmd;
-        if (dir.equals("forward")) {
-            cmd = String.format("MOV:FWD:%03d", movementSpeed);
-        } else if (dir.equals("backward")) {
-            cmd = String.format("MOV:BWD:%03d", movementSpeed);
-        } else {
-            reportError("Invalid direction: " + direction
-                + " — use \"forward\" or \"backward\"");
-            return;
-        }
+        String cmd = direction.equalsIgnoreCase("forward")
+            ? String.format("MOV:FWD:%03d", movementSpeed)
+            : String.format("MOV:BWD:%03d", movementSpeed);
         connectivity.sendCommand(cmd);
     }
 
@@ -129,15 +165,14 @@ public class LegoSpikeMovement extends AndroidNonvisibleComponent {
      * steering = 0: straight. steering = -100: full left. steering = +100: full right.
      * Uses the stored speed from SetMovementSpeed.
      *
-     * @param steering steering value –100 to +100
+     * @param steering –100 to +100
      */
     @SimpleFunction(description =
-        "Start moving with steering (-100 to +100, 0 = straight). "
+        "Start moving with steering (–100 to +100, 0 = straight). "
         + "Uses the speed set by SetMovementSpeed.")
     public void StartMovingWithSteering(int steering) {
         if (!checkConnected()) return;
         steering = Math.max(-100, Math.min(100, steering));
-        // %+d always emits a sign: +50 or -50 (Python int("+50")=50, int("-50")=-50)
         connectivity.sendCommand(
             String.format("MOV:STEER:%+d:%03d", steering, movementSpeed));
     }
@@ -157,8 +192,6 @@ public class LegoSpikeMovement extends AndroidNonvisibleComponent {
         if (!connectivity.IsConnected()) { reportError("Not connected to hub"); return false; }
         return true;
     }
-
-    private static boolean isValidPort(String port) { return port.matches("[A-F]"); }
 
     private void reportError(String msg) {
         if (connectivity != null) connectivity.ErrorOccurred(msg);

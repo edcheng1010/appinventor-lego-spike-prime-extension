@@ -24,25 +24,16 @@ import com.google.appinventor.components.runtime.EventDispatcher;
  * LegoSpikeSensor — sensor reads and hub state queries.
  * Matches LEGO SPIKE Prime "Sensor Blocks" + "More Sensors" categories.
  *
- * MVP read functions (each fires a corresponding event asynchronously):
- *   GetColor(port)        → ColorRead(port, color)
- *   GetDistance(port)     → DistanceRead(port, mm)
- *   GetPressure(port)     → PressureRead(port, value)
- *   IsPressed(port)       → PressureChecked(port, isPressed)
- *   GetTiltAngle(axis)    → TiltAngleRead(axis, degrees)
- *   GetTimer()            → TimerRead(seconds)
- *   ResetTimer()
- *
- * axis values for GetTiltAngle: "pitch", "roll", "yaw"
- *
- * Dependency: set the Connectivity property to a LegoSpikeConnectivity instance.
- * The hub controller program sends sensor data back via TunnelMessage;
- * this component parses those responses and fires the corresponding events.
+ * Configure Port (for port-based sensors) and Axis (for hub tilt) in the
+ * Designer or via blocks, then call the sensor read functions.
+ * Each call requests a value from the hub; the result fires as an event.
+ * Use one LegoSpikeSensor instance per physical sensor.
  */
 @SimpleObject(external = true)
-@DesignerComponent(version = 2,
+@DesignerComponent(version = 4,
     description = "Reads sensors on a LEGO SPIKE Prime hub. "
-        + "Each GetXxx() call requests a value; the result fires as an event. "
+        + "Set Port and call GetColor, GetDistance, GetPressure, or IsPressed. "
+        + "Set Axis and call GetTiltAngle. Each fires an event with the result. "
         + "Set the Connectivity property to a LegoSpikeConnectivity component.",
     category = ComponentCategory.EXTENSION,
     nonVisible = true,
@@ -52,6 +43,9 @@ public class LegoSpikeSensor extends AndroidNonvisibleComponent
 
     private LegoSpikeConnectivity connectivity;
     private final Handler mainHandler = new Handler(Looper.getMainLooper());
+
+    private String port = "A";
+    private String axis = "PITCH";
 
     public LegoSpikeSensor(ComponentContainer container) {
         super(container.$form());
@@ -65,7 +59,6 @@ public class LegoSpikeSensor extends AndroidNonvisibleComponent
     @DesignerProperty(editorType = PropertyTypeConstants.PROPERTY_TYPE_COMPONENT
         + ":io.github.appinventor.legospikeprime.LegoSpikeConnectivity")
     public void Connectivity(Component component) {
-        // Unregister from old connectivity
         if (this.connectivity != null) {
             this.connectivity.removeDataListener(this);
         }
@@ -80,78 +73,103 @@ public class LegoSpikeSensor extends AndroidNonvisibleComponent
     public Component Connectivity() { return connectivity; }
 
     // =========================================================================
-    // MVP read functions
+    // Port property
+    // =========================================================================
+    @SimpleProperty(category = PropertyCategory.BEHAVIOR,
+        description = "Sensor port (A–F) used by GetColor, GetDistance, GetPressure, and IsPressed")
+    @DesignerProperty(
+        editorType   = PropertyTypeConstants.PROPERTY_TYPE_CHOICES,
+        editorArgs   = {"A", "B", "C", "D", "E", "F"},
+        defaultValue = "A")
+    public void Port(@Options(MotorPort.class) String value) {
+        if (value != null && value.toUpperCase().trim().matches("[A-F]")) {
+            port = value.toUpperCase().trim();
+        }
+    }
+
+    @SimpleProperty(category = PropertyCategory.BEHAVIOR,
+        description = "Sensor port (A–F) used by GetColor, GetDistance, GetPressure, and IsPressed")
+    public String Port() { return port; }
+
+    // =========================================================================
+    // Axis property
+    // =========================================================================
+    @SimpleProperty(category = PropertyCategory.BEHAVIOR,
+        description = "Hub tilt axis used by GetTiltAngle: PITCH, ROLL, or YAW")
+    @DesignerProperty(
+        editorType   = PropertyTypeConstants.PROPERTY_TYPE_CHOICES,
+        editorArgs   = {"PITCH", "ROLL", "YAW"},
+        defaultValue = "PITCH")
+    public void Axis(@Options(TiltAxis.class) String value) {
+        if (value != null) {
+            String v = value.trim().toUpperCase();
+            if (v.equals("PITCH") || v.equals("ROLL") || v.equals("YAW")) {
+                axis = v;
+            }
+        }
+    }
+
+    @SimpleProperty(category = PropertyCategory.BEHAVIOR,
+        description = "Hub tilt axis used by GetTiltAngle: PITCH, ROLL, or YAW")
+    public String Axis() { return axis; }
+
+    // =========================================================================
+    // Sensor read functions
     // =========================================================================
 
     /**
-     * Request the color detected by the color sensor on the given port.
+     * Request the color detected by the color sensor on the configured Port.
      * Fires ColorRead(port, color) when the hub responds.
-     *
-     * @param port port letter A–F
      */
     @SimpleFunction(description =
-        "Request the color detected by the color sensor on the given port (A-F). "
+        "Request the color from the color sensor on the configured Port. "
         + "Fires ColorRead when the hub responds.")
-    public void GetColor(@Options(MotorPort.class) String port) {
-        sendSensorCommand("SEN:CLR:" + validatePort(port));
+    public void GetColor() {
+        sendSensorCommand("SEN:CLR:" + port);
     }
 
     /**
-     * Request the distance measured by the distance sensor on the given port.
-     * Fires DistanceRead(port, mm) when the hub responds. Returns -1 if invalid.
-     *
-     * @param port port letter A–F
+     * Request the distance measured by the distance sensor on the configured Port.
+     * Fires DistanceRead(port, mm) when the hub responds. Returns -1 if out of range.
      */
     @SimpleFunction(description =
-        "Request the distance (mm) from the distance sensor on the given port (A-F). "
+        "Request the distance (mm) from the distance sensor on the configured Port. "
         + "Fires DistanceRead when the hub responds. Returns -1 if out of range.")
-    public void GetDistance(@Options(MotorPort.class) String port) {
-        sendSensorCommand("SEN:DST:" + validatePort(port));
+    public void GetDistance() {
+        sendSensorCommand("SEN:DST:" + port);
     }
 
     /**
-     * Request the force measured by the force sensor on the given port.
+     * Request the force measured by the force sensor on the configured Port.
      * Fires PressureRead(port, value) when the hub responds.
-     *
-     * @param port port letter A–F
      */
     @SimpleFunction(description =
-        "Request the force value from the force sensor on the given port (A-F). "
+        "Request the force value from the force sensor on the configured Port. "
         + "Fires PressureRead when the hub responds.")
-    public void GetPressure(@Options(MotorPort.class) String port) {
-        sendSensorCommand("SEN:PRS:" + validatePort(port));
+    public void GetPressure() {
+        sendSensorCommand("SEN:PRS:" + port);
     }
 
     /**
-     * Request whether the force sensor on the given port is pressed.
+     * Request whether the force sensor on the configured Port is pressed.
      * Fires PressureChecked(port, isPressed) when the hub responds.
-     *
-     * @param port port letter A–F
      */
     @SimpleFunction(description =
-        "Ask whether the force sensor on the given port (A-F) is currently pressed. "
+        "Ask whether the force sensor on the configured Port is pressed. "
         + "Fires PressureChecked when the hub responds.")
-    public void IsPressed(@Options(MotorPort.class) String port) {
-        sendSensorCommand("SEN:ISP:" + validatePort(port));
+    public void IsPressed() {
+        sendSensorCommand("SEN:ISP:" + port);
     }
 
     /**
-     * Request the hub tilt angle for the given axis.
+     * Request the hub tilt angle for the configured Axis.
      * Fires TiltAngleRead(axis, degrees) when the hub responds.
-     *
-     * @param axis "pitch", "roll", or "yaw"
      */
     @SimpleFunction(description =
-        "Request the hub tilt angle for the given axis (\"pitch\", \"roll\", or \"yaw\"). "
+        "Request the hub tilt angle for the configured Axis (PITCH, ROLL, or YAW). "
         + "Fires TiltAngleRead when the hub responds.")
-    public void GetTiltAngle(@Options(TiltAxis.class) String axis) {
-        if (axis == null || axis.isEmpty()) axis = "PITCH";
-        String a = axis.toUpperCase().trim();
-        if (!a.equals("PITCH") && !a.equals("ROLL") && !a.equals("YAW")) {
-            reportError("Invalid axis: " + axis + " — use \"Pitch\", \"Roll\", or \"Yaw\"");
-            return;
-        }
-        sendSensorCommand("SEN:TLT:" + a);
+    public void GetTiltAngle() {
+        sendSensorCommand("SEN:TLT:" + axis);
     }
 
     /**
@@ -176,7 +194,6 @@ public class LegoSpikeSensor extends AndroidNonvisibleComponent
     // Events
     // =========================================================================
 
-    /** Fired when the hub reports a color sensor reading. */
     @SimpleEvent(description =
         "Fired when the hub reports a color reading. "
         + "color: color name string (e.g. RED, GREEN, BLUE, NONE).")
@@ -184,7 +201,6 @@ public class LegoSpikeSensor extends AndroidNonvisibleComponent
         EventDispatcher.dispatchEvent(this, "ColorRead", port, color);
     }
 
-    /** Fired when the hub reports a distance sensor reading. */
     @SimpleEvent(description =
         "Fired when the hub reports a distance reading in millimetres. "
         + "Returns -1 if out of range or no sensor connected.")
@@ -192,29 +208,25 @@ public class LegoSpikeSensor extends AndroidNonvisibleComponent
         EventDispatcher.dispatchEvent(this, "DistanceRead", port, mm);
     }
 
-    /** Fired when the hub reports a force sensor reading. */
     @SimpleEvent(description =
-        "Fired when the hub reports a force/pressure sensor reading (0-100).")
+        "Fired when the hub reports a force/pressure sensor reading (0–100).")
     public void PressureRead(String port, int value) {
         EventDispatcher.dispatchEvent(this, "PressureRead", port, value);
     }
 
-    /** Fired when the hub reports whether the force sensor is pressed. */
     @SimpleEvent(description =
         "Fired when the hub reports whether the force sensor is pressed.")
     public void PressureChecked(String port, boolean isPressed) {
         EventDispatcher.dispatchEvent(this, "PressureChecked", port, isPressed);
     }
 
-    /** Fired when the hub reports a tilt angle. */
     @SimpleEvent(description =
         "Fired when the hub reports a tilt angle. "
-        + "axis: \"PITCH\", \"ROLL\", or \"YAW\". degrees: angle in degrees.")
+        + "axis: PITCH, ROLL, or YAW. degrees: angle in degrees.")
     public void TiltAngleRead(String axis, int degrees) {
         EventDispatcher.dispatchEvent(this, "TiltAngleRead", axis, degrees);
     }
 
-    /** Fired when the hub reports the elapsed timer value. */
     @SimpleEvent(description =
         "Fired when the hub reports the elapsed timer value in whole seconds.")
     public void TimerRead(int seconds) {
@@ -222,19 +234,8 @@ public class LegoSpikeSensor extends AndroidNonvisibleComponent
     }
 
     // =========================================================================
-    // HubDataListener — parse sensor responses from the hub
+    // HubDataListener — parse sensor responses
     // =========================================================================
-
-    /**
-     * Called by LegoSpikeConnectivity whenever the hub sends a non-rdy tunnel payload.
-     * Expected formats:
-     *   SEN:CLR:A:RED       → ColorRead("A", "RED")
-     *   SEN:DST:A:150       → DistanceRead("A", 150)
-     *   SEN:PRS:A:50        → PressureRead("A", 50)
-     *   SEN:ISP:A:1         → PressureChecked("A", true)
-     *   SEN:TLT:PITCH:15    → TiltAngleRead("PITCH", 15)
-     *   SEN:TMR:3           → TimerRead(3)
-     */
     @Override
     public void onHubData(String data) {
         if (data == null || !data.startsWith("SEN:")) return;
@@ -246,50 +247,45 @@ public class LegoSpikeSensor extends AndroidNonvisibleComponent
         switch (type) {
             case "CLR":
                 if (parts.length >= 4) {
-                    final String port  = parts[2];
+                    final String p     = parts[2];
                     final String color = parts[3];
-                    mainHandler.post(() -> ColorRead(port, color));
+                    mainHandler.post(() -> ColorRead(p, color));
                 }
                 break;
-
             case "DST":
                 if (parts.length >= 4) {
-                    final String port = parts[2];
+                    final String p = parts[2];
                     try {
                         final int mm = Integer.parseInt(parts[3]);
-                        mainHandler.post(() -> DistanceRead(port, mm));
+                        mainHandler.post(() -> DistanceRead(p, mm));
                     } catch (NumberFormatException ignored) {}
                 }
                 break;
-
             case "PRS":
                 if (parts.length >= 4) {
-                    final String port = parts[2];
+                    final String p = parts[2];
                     try {
                         final int value = Integer.parseInt(parts[3]);
-                        mainHandler.post(() -> PressureRead(port, value));
+                        mainHandler.post(() -> PressureRead(p, value));
                     } catch (NumberFormatException ignored) {}
                 }
                 break;
-
             case "ISP":
                 if (parts.length >= 4) {
-                    final String port = parts[2];
+                    final String p       = parts[2];
                     final boolean pressed = "1".equals(parts[3]);
-                    mainHandler.post(() -> PressureChecked(port, pressed));
+                    mainHandler.post(() -> PressureChecked(p, pressed));
                 }
                 break;
-
             case "TLT":
                 if (parts.length >= 4) {
-                    final String axis = parts[2];
+                    final String ax = parts[2];
                     try {
                         final int degrees = Integer.parseInt(parts[3]);
-                        mainHandler.post(() -> TiltAngleRead(axis, degrees));
+                        mainHandler.post(() -> TiltAngleRead(ax, degrees));
                     } catch (NumberFormatException ignored) {}
                 }
                 break;
-
             case "TMR":
                 if (parts.length >= 3) {
                     try {
@@ -298,7 +294,6 @@ public class LegoSpikeSensor extends AndroidNonvisibleComponent
                     } catch (NumberFormatException ignored) {}
                 }
                 break;
-
             default:
                 break;
         }
@@ -316,12 +311,6 @@ public class LegoSpikeSensor extends AndroidNonvisibleComponent
         if (connectivity == null) { reportError("Connectivity not set"); return false; }
         if (!connectivity.IsConnected()) { reportError("Not connected to hub"); return false; }
         return true;
-    }
-
-    private String validatePort(String port) {
-        if (port == null || port.isEmpty()) return "A";
-        String p = port.toUpperCase().trim();
-        return p.matches("[A-F]") ? p : "A";
     }
 
     private void reportError(String msg) {

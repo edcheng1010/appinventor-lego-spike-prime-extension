@@ -19,21 +19,13 @@ import com.google.appinventor.components.runtime.ComponentContainer;
  * LegoSpikeLight — 5×5 light matrix and center button LED control.
  * Matches LEGO SPIKE Prime "Light Blocks Category".
  *
- * MVP blocks: TurnOnLightMatrix, TurnOffLightMatrix, WriteOnLightMatrix,
- *             SetPixelBrightness, SetCenterButtonLight.
- *
- * Image names for TurnOnLightMatrix:
- *   HEART, HEART_SMALL, HAPPY, SMILE, SAD, CONFUSED, ANGRY, ASLEEP,
- *   SURPRISED, YES, NO, ARROW_N, ARROW_E, ARROW_S, ARROW_W
- *
- * Color names for SetCenterButtonLight:
- *   RED, GREEN, BLUE, YELLOW, WHITE, CYAN, MAGENTA, ORANGE, BLACK
- *
- * Dependency: set the Connectivity property to a LegoSpikeConnectivity instance.
+ * Configure Image and ButtonColor in the Designer or via blocks, then call
+ * the corresponding action functions.
  */
 @SimpleObject(external = true)
-@DesignerComponent(version = 2,
+@DesignerComponent(version = 4,
     description = "Controls the 5x5 light matrix and center button LED on a LEGO SPIKE Prime hub. "
+        + "Set Image and ButtonColor, then call TurnOnLightMatrix or SetCenterButtonLight. "
         + "Set the Connectivity property to a LegoSpikeConnectivity component.",
     category = ComponentCategory.EXTENSION,
     nonVisible = true,
@@ -41,6 +33,9 @@ import com.google.appinventor.components.runtime.ComponentContainer;
 public class LegoSpikeLight extends AndroidNonvisibleComponent {
 
     private LegoSpikeConnectivity connectivity;
+
+    private String image       = "HAPPY";
+    private String buttonColor = "WHITE";
 
     public LegoSpikeLight(ComponentContainer container) {
         super(container.$form());
@@ -64,24 +59,58 @@ public class LegoSpikeLight extends AndroidNonvisibleComponent {
     public Component Connectivity() { return connectivity; }
 
     // =========================================================================
-    // MVP blocks
+    // Image property
+    // =========================================================================
+    @SimpleProperty(category = PropertyCategory.BEHAVIOR,
+        description = "Image to show when TurnOnLightMatrix is called")
+    @DesignerProperty(
+        editorType   = PropertyTypeConstants.PROPERTY_TYPE_CHOICES,
+        editorArgs   = {"HEART", "HEART_SMALL", "HAPPY", "SMILE", "SAD", "CONFUSED",
+                        "ANGRY", "ASLEEP", "SURPRISED", "YES", "NO",
+                        "ARROW_N", "ARROW_E", "ARROW_S", "ARROW_W"},
+        defaultValue = "HAPPY")
+    public void Image(@Options(LightMatrixImage.class) String value) {
+        if (value != null && !value.trim().isEmpty()) {
+            image = value.trim().toUpperCase();
+        }
+    }
+
+    @SimpleProperty(category = PropertyCategory.BEHAVIOR,
+        description = "Image to show when TurnOnLightMatrix is called")
+    public String Image() { return image; }
+
+    // =========================================================================
+    // ButtonColor property
+    // =========================================================================
+    @SimpleProperty(category = PropertyCategory.BEHAVIOR,
+        description = "Color of the center button LED when SetCenterButtonLight is called")
+    @DesignerProperty(
+        editorType   = PropertyTypeConstants.PROPERTY_TYPE_CHOICES,
+        editorArgs   = {"BLACK", "RED", "GREEN", "YELLOW", "BLUE", "WHITE",
+                        "CYAN", "MAGENTA", "ORANGE", "VIOLET", "AZURE"},
+        defaultValue = "WHITE")
+    public void ButtonColor(@Options(HubLightColor.class) String value) {
+        if (value != null && !value.trim().isEmpty()) {
+            buttonColor = value.trim().toUpperCase();
+        }
+    }
+
+    @SimpleProperty(category = PropertyCategory.BEHAVIOR,
+        description = "Color of the center button LED when SetCenterButtonLight is called")
+    public String ButtonColor() { return buttonColor; }
+
+    // =========================================================================
+    // Light control blocks
     // =========================================================================
 
     /**
-     * Turn on the 5×5 light matrix with a named image.
-     * Available images: HEART, HEART_SMALL, HAPPY, SMILE, SAD, CONFUSED, ANGRY,
-     * ASLEEP, SURPRISED, YES, NO, ARROW_N, ARROW_E, ARROW_S, ARROW_W.
-     *
-     * @param image image name (case-insensitive)
+     * Turn on the 5×5 light matrix with the configured Image.
      */
     @SimpleFunction(description =
-        "Turn on the 5x5 light matrix with a named image. "
-        + "Images: HEART, HAPPY, SMILE, SAD, CONFUSED, ANGRY, ASLEEP, SURPRISED, "
-        + "YES, NO, ARROW_N, ARROW_E, ARROW_S, ARROW_W.")
-    public void TurnOnLightMatrix(@Options(LightMatrixImage.class) String image) {
+        "Turn on the 5x5 light matrix with the configured Image.")
+    public void TurnOnLightMatrix() {
         if (!checkConnected()) return;
-        if (image == null || image.isEmpty()) image = "HAPPY";
-        connectivity.sendCommand("LGT:ON:" + image.toUpperCase().trim());
+        connectivity.sendCommand("LGT:ON:" + image);
     }
 
     /** Turn off the 5×5 light matrix. */
@@ -111,8 +140,8 @@ public class LegoSpikeLight extends AndroidNonvisibleComponent {
      * @param brightness 0–100 percent
      */
     @SimpleFunction(description =
-        "Set the brightness (0-100) of a single pixel on the 5x5 light matrix. "
-        + "x: column 0-4 (left to right), y: row 0-4 (top to bottom).")
+        "Set the brightness (0–100) of a single pixel. "
+        + "x: column 0–4 (left to right), y: row 0–4 (top to bottom).")
     public void SetPixelBrightness(int x, int y, int brightness) {
         if (!checkConnected()) return;
         x          = Math.max(0, Math.min(4, x));
@@ -122,18 +151,13 @@ public class LegoSpikeLight extends AndroidNonvisibleComponent {
     }
 
     /**
-     * Set the color of the center button LED.
-     * Color names: RED, GREEN, BLUE, YELLOW, WHITE, CYAN, MAGENTA, ORANGE, BLACK.
-     *
-     * @param color color name (case-insensitive)
+     * Set the center button LED to the configured ButtonColor.
      */
     @SimpleFunction(description =
-        "Set the center button LED color. "
-        + "Colors: RED, GREEN, BLUE, YELLOW, WHITE, CYAN, MAGENTA, ORANGE, BLACK.")
-    public void SetCenterButtonLight(@Options(HubLightColor.class) String color) {
+        "Set the center button LED to the configured ButtonColor.")
+    public void SetCenterButtonLight() {
         if (!checkConnected()) return;
-        if (color == null || color.isEmpty()) color = "WHITE";
-        connectivity.sendCommand("LGT:BTN:" + color.toUpperCase().trim());
+        connectivity.sendCommand("LGT:BTN:" + buttonColor);
     }
 
     // =========================================================================
