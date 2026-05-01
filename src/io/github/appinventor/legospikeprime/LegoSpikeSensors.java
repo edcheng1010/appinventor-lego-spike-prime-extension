@@ -21,13 +21,13 @@ import com.google.appinventor.components.runtime.ComponentContainer;
 import com.google.appinventor.components.runtime.EventDispatcher;
 
 /**
- * LegoSpikeSensor — sensor reads and hub state queries.
+ * LegoSpikeSensors — sensor reads and hub state queries.
  * Matches LEGO SPIKE Prime "Sensor Blocks" + "More Sensors" categories.
  *
  * Configure Port (for port-based sensors) and Axis (for hub tilt) in the
  * Designer or via blocks, then call the sensor read functions.
  * Each call requests a value from the hub; the result fires as an event.
- * Use one LegoSpikeSensor instance per physical sensor.
+ * Use one LegoSpikeSensors instance per physical sensor.
  */
 @SimpleObject(external = true)
 @DesignerComponent(version = 4,
@@ -38,7 +38,7 @@ import com.google.appinventor.components.runtime.EventDispatcher;
     category = ComponentCategory.EXTENSION,
     nonVisible = true,
     iconName = "aiwebres/legospike.png")
-public class LegoSpikeSensor extends AndroidNonvisibleComponent
+public class LegoSpikeSensors extends AndroidNonvisibleComponent
         implements LegoSpikeConnectivity.HubDataListener {
 
     private LegoSpikeConnectivity connectivity;
@@ -49,7 +49,7 @@ public class LegoSpikeSensor extends AndroidNonvisibleComponent
     private String forceSensorPort    = "E";
     private String axis               = "PITCH";
 
-    public LegoSpikeSensor(ComponentContainer container) {
+    public LegoSpikeSensors(ComponentContainer container) {
         super(container.$form());
     }
 

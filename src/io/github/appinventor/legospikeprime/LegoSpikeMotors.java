@@ -16,11 +16,11 @@ import com.google.appinventor.components.runtime.Component;
 import com.google.appinventor.components.runtime.ComponentContainer;
 
 /**
- * LegoSpikeMotor — individual motor control.
+ * LegoSpikeMotors — individual motor control.
  * Matches LEGO SPIKE Prime "Motor Blocks Category".
  *
  * Configure Port and Direction in the Designer or via blocks, then call
- * StartMotor(), StopMotor(), or SetMotorSpeed(). One LegoSpikeMotor instance
+ * StartMotor(), StopMotor(), or SetMotorSpeed(). One LegoSpikeMotors instance
  * per physical motor is the recommended pattern.
  */
 @SimpleObject(external = true)
@@ -31,7 +31,7 @@ import com.google.appinventor.components.runtime.ComponentContainer;
     category = ComponentCategory.EXTENSION,
     nonVisible = true,
     iconName = "aiwebres/legospike.png")
-public class LegoSpikeMotor extends AndroidNonvisibleComponent {
+public class LegoSpikeMotors extends AndroidNonvisibleComponent {
 
     private LegoSpikeConnectivity connectivity;
 
@@ -39,7 +39,7 @@ public class LegoSpikeMotor extends AndroidNonvisibleComponent {
     private String direction = "clockwise";
     private int    speed     = 50;
 
-    public LegoSpikeMotor(ComponentContainer container) {
+    public LegoSpikeMotors(ComponentContainer container) {
         super(container.$form());
     }
 
