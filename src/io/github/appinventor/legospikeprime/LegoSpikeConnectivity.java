@@ -984,7 +984,7 @@ public class LegoSpikeConnectivity extends AndroidNonvisibleComponent {
         logDebug("Sending InfoRequest");
         sendFramedMessage(MessageFramer.pack(MessageBuilder.buildInfoRequest()));
         startDisconnectWatchdog();
-        mainHandler.postDelayed(() -> UploadController(), 500);
+        UploadController();
     }
 
     public void onDisconnected() {

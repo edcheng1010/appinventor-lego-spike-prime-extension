@@ -83,11 +83,11 @@ public class LegoSpikeMotor extends AndroidNonvisibleComponent {
     // Direction property — designer dropdown + block getter/setter
     // =========================================================================
     @SimpleProperty(category = PropertyCategory.BEHAVIOR,
-        description = "The motor direction: \"clockwise\" or \"counterclockwise\"")
+        description = "The motor direction: \"Clockwise\" or \"Counterclockwise\"")
     @DesignerProperty(
         editorType  = PropertyTypeConstants.PROPERTY_TYPE_CHOICES,
-        editorArgs  = {"clockwise", "counterclockwise"},
-        defaultValue = "clockwise")
+        editorArgs  = {"Clockwise", "Counterclockwise"},
+        defaultValue = "Clockwise")
     public void Direction(@Options(MotorDirection.class) String value) {
         if ("clockwise".equalsIgnoreCase(value) || "counterclockwise".equalsIgnoreCase(value)) {
             direction = value.toLowerCase();
@@ -95,7 +95,7 @@ public class LegoSpikeMotor extends AndroidNonvisibleComponent {
     }
 
     @SimpleProperty(category = PropertyCategory.BEHAVIOR,
-        description = "The motor direction: \"clockwise\" or \"counterclockwise\"")
+        description = "The motor direction: \"Clockwise\" or \"Counterclockwise\"")
     public String Direction() { return direction; }
 
     // =========================================================================
