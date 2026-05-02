@@ -176,7 +176,10 @@ public class LegoSpikeConnectivity extends AndroidNonvisibleComponent {
         "            elif sub == 'TLT' and len(parts) >= 3:\n" +
         "                axis = parts[2].upper()\n" +
         "                try:\n" +
-        "                    angles = hub.motion_sensor.tilt_angles()\n" +
+        "                    try:\n" +
+        "                        angles = hub.motion_sensor.tilt_angles()\n" +
+        "                    except AttributeError:\n" +
+        "                        angles = hub.imu.tilt_angles()\n" +
         "                    val = {'PITCH': angles[0], 'ROLL': angles[1], 'YAW': angles[2]}.get(axis.upper(), 0)\n" +
         "                    resp = ('SEN:TLT:' + axis + ':' + str(val // 10)).encode()\n" +
         "                except: resp = ('SEN:TLT:' + axis + ':0').encode()\n" +

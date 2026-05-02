@@ -169,8 +169,13 @@ def on_message(data):
             elif sub == 'TLT' and len(parts) >= 3:
                 axis = parts[2].upper()
                 try:
-                    # tilt_angles() returns (pitch, roll, yaw) in decidegrees
-                    angles = hub.motion_sensor.tilt_angles()
+                    # tilt_angles() returns (pitch, roll, yaw) in decidegrees.
+                    # Try hub.motion_sensor first, fall back to hub.imu for
+                    # firmware variants that renamed the module.
+                    try:
+                        angles = hub.motion_sensor.tilt_angles()
+                    except AttributeError:
+                        angles = hub.imu.tilt_angles()
                     val = {'PITCH': angles[0], 'ROLL': angles[1], 'YAW': angles[2]}.get(axis.upper(), 0)
                     resp = ('SEN:TLT:' + axis + ':' + str(val // 10)).encode()
                 except Exception:

@@ -230,9 +230,20 @@ public class LegoSpikeSensors extends AndroidNonvisibleComponent
     @SimpleEvent(description =
         "Fired when the hub reports a color reading. "
         + "color: title-case name (e.g. Red, Green, None). "
-        + "Use a SensorColor block from the dropdown to compare: if color = SensorColor.Red")
-    public void ColorRead(String port, @Options(SensorColor.class) String color) {
+        + "Use ColorConstant block for comparison: if color = ColorConstant(Red)")
+    public void ColorRead(String port, String color) {
         EventDispatcher.dispatchEvent(this, "ColorRead", port, color);
+    }
+
+    /**
+     * Returns a SensorColor constant string for use in ColorRead comparisons.
+     * Example: if color = ColorConstant(Red) then ...
+     */
+    @SimpleFunction(description =
+        "Returns a color constant string for comparing with the color parameter "
+        + "in ColorRead events. Example: if color = ColorConstant(Red) then ...")
+    public String ColorConstant(@Options(SensorColor.class) String color) {
+        return color;
     }
 
     @SimpleEvent(description =

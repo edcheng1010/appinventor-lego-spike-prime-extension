@@ -165,8 +165,8 @@ public class LegoSpikeMovement extends AndroidNonvisibleComponent {
         if (!checkConnected()) return;
         sendPair();
         steering = Math.max(-100, Math.min(100, steering));
-        connectivity.sendCommand(
-            String.format("MOV:STEER:%+d:%03d", steering, movementSpeed));
+        int speed = direction.equalsIgnoreCase("backward") ? -movementSpeed : movementSpeed;
+        connectivity.sendCommand(String.format("MOV:STEER:%+d:%d", steering, speed));
     }
 
     /** Stop the drivebase immediately. */
