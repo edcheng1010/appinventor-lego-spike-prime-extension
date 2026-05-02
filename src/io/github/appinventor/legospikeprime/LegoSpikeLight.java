@@ -35,7 +35,7 @@ public class LegoSpikeLight extends AndroidNonvisibleComponent {
     private LegoSpikeConnectivity connectivity;
 
     private String image       = "HAPPY";
-    private String buttonColor = "WHITE";
+    private String buttonColor = "White";
 
     public LegoSpikeLight(ComponentContainer container) {
         super(container.$form());
@@ -86,12 +86,14 @@ public class LegoSpikeLight extends AndroidNonvisibleComponent {
         description = "Color of the center button LED when SetCenterButtonLight is called")
     @DesignerProperty(
         editorType   = PropertyTypeConstants.PROPERTY_TYPE_CHOICES,
-        editorArgs   = {"BLACK", "RED", "GREEN", "YELLOW", "BLUE", "WHITE",
-                        "CYAN", "MAGENTA", "ORANGE", "VIOLET", "AZURE"},
-        defaultValue = "WHITE")
+        editorArgs   = {"Black", "Red", "Green", "Yellow", "Blue", "White",
+                        "Cyan", "Magenta", "Orange", "Violet", "Azure"},
+        defaultValue = "White")
     public void ButtonColor(@Options(HubLightColor.class) String value) {
         if (value != null && !value.trim().isEmpty()) {
-            buttonColor = value.trim().toUpperCase();
+            String v = value.trim();
+            buttonColor = v.isEmpty() ? v
+                : v.substring(0, 1).toUpperCase() + v.substring(1).toLowerCase();
         }
     }
 

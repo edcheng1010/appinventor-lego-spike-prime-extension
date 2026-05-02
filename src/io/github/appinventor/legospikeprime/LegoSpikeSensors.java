@@ -49,7 +49,6 @@ public class LegoSpikeSensors extends AndroidNonvisibleComponent
     private String distanceSensorPort = "D";
     private String pressureSensorPort = "E";
     private String axis               = "PITCH";
-    private String color              = "Red";
 
     public LegoSpikeSensors(ComponentContainer container) {
         super(container.$form());
@@ -149,36 +148,6 @@ public class LegoSpikeSensors extends AndroidNonvisibleComponent
     public String Axis() { return axis; }
 
     // =========================================================================
-    // Color comparison property
-    // =========================================================================
-
-    /**
-     * A color constant for comparing against the color parameter in ColorRead events.
-     * Set this to the color you want to detect; compare with the color parameter
-     * returned by the ColorRead event using an equality check.
-     * Colors are in title case (e.g. "Red", "Green") matching the ColorRead event.
-     */
-    @SimpleProperty(category = PropertyCategory.BEHAVIOR,
-        description = "A color constant for comparison in ColorRead events. "
-            + "Compare this with the color parameter from ColorRead.")
-    @DesignerProperty(
-        editorType   = PropertyTypeConstants.PROPERTY_TYPE_CHOICES,
-        editorArgs   = {"Black", "Red", "Green", "Yellow", "Blue", "White",
-                        "Cyan", "Magenta", "Orange", "Violet", "Azure", "None"},
-        defaultValue = "Red")
-    public void Color(@Options(SensorColor.class) String value) {
-        if (value != null && !value.trim().isEmpty()) {
-            String v = value.trim();
-            color = v.substring(0, 1).toUpperCase()
-                  + (v.length() > 1 ? v.substring(1).toLowerCase() : "");
-        }
-    }
-
-    @SimpleProperty(category = PropertyCategory.BEHAVIOR,
-        description = "A color constant for comparison in ColorRead events.")
-    public String Color() { return color; }
-
-    // =========================================================================
     // Sensor read functions
     // =========================================================================
 
@@ -261,9 +230,9 @@ public class LegoSpikeSensors extends AndroidNonvisibleComponent
 
     @SimpleEvent(description =
         "Fired when the hub reports a color reading. "
-        + "color: title-case color name (e.g. Red, Green, Blue, None). "
-        + "Compare with the Color property to check for a specific color.")
-    public void ColorRead(String port, String color) {
+        + "color: title-case name (e.g. Red, Green, None). "
+        + "Use a SensorColor block from the dropdown to compare: if color = SensorColor.Red")
+    public void ColorRead(String port, @Options(SensorColor.class) String color) {
         EventDispatcher.dispatchEvent(this, "ColorRead", port, color);
     }
 
