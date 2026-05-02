@@ -9,7 +9,7 @@ import com.google.appinventor.components.annotations.SimpleObject;
 import com.google.appinventor.components.annotations.SimpleProperty;
 import com.google.appinventor.components.common.ComponentCategory;
 import com.google.appinventor.components.common.MovementDirection;
-import com.google.appinventor.components.common.MotorPort;
+import com.google.appinventor.components.common.Port;
 import com.google.appinventor.components.common.PropertyTypeConstants;
 import com.google.appinventor.components.runtime.AndroidNonvisibleComponent;
 import com.google.appinventor.components.runtime.Component;
@@ -70,7 +70,7 @@ public class LegoSpikeMovement extends AndroidNonvisibleComponent {
         editorType   = PropertyTypeConstants.PROPERTY_TYPE_CHOICES,
         editorArgs   = {"A", "B", "C", "D", "E", "F"},
         defaultValue = "A")
-    public void LeftPort(@Options(MotorPort.class) String value) {
+    public void LeftPort(@Options(Port.class) String value) {
         if (value != null && value.toUpperCase().trim().matches("[A-F]")) {
             leftPort = value.toUpperCase().trim();
         }
@@ -89,7 +89,7 @@ public class LegoSpikeMovement extends AndroidNonvisibleComponent {
         editorType   = PropertyTypeConstants.PROPERTY_TYPE_CHOICES,
         editorArgs   = {"A", "B", "C", "D", "E", "F"},
         defaultValue = "B")
-    public void RightPort(@Options(MotorPort.class) String value) {
+    public void RightPort(@Options(Port.class) String value) {
         if (value != null && value.toUpperCase().trim().matches("[A-F]")) {
             rightPort = value.toUpperCase().trim();
         }

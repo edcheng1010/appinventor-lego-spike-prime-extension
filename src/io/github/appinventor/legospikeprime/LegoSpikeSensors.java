@@ -12,8 +12,9 @@ import com.google.appinventor.components.annotations.SimpleFunction;
 import com.google.appinventor.components.annotations.SimpleObject;
 import com.google.appinventor.components.annotations.SimpleProperty;
 import com.google.appinventor.components.common.ComponentCategory;
-import com.google.appinventor.components.common.MotorPort;
+import com.google.appinventor.components.common.Port;
 import com.google.appinventor.components.common.PropertyTypeConstants;
+import com.google.appinventor.components.common.SensorColor;
 import com.google.appinventor.components.common.TiltAxis;
 import com.google.appinventor.components.runtime.AndroidNonvisibleComponent;
 import com.google.appinventor.components.runtime.Component;
@@ -32,7 +33,7 @@ import com.google.appinventor.components.runtime.EventDispatcher;
 @SimpleObject(external = true)
 @DesignerComponent(version = 4,
     description = "Reads sensors on a LEGO SPIKE Prime hub. "
-        + "Set ColorSensorPort, DistanceSensorPort, and ForceSensorPort independently "
+        + "Set ColorSensorPort, DistanceSensorPort, and PressureSensorPort independently "
         + "so different sensors can be read in parallel. Set Axis for hub tilt. "
         + "Set the Connectivity property to a LegoSpikeConnectivity component.",
     category = ComponentCategory.EXTENSION,
@@ -46,8 +47,9 @@ public class LegoSpikeSensors extends AndroidNonvisibleComponent
 
     private String colorSensorPort    = "C";
     private String distanceSensorPort = "D";
-    private String forceSensorPort    = "E";
+    private String pressureSensorPort = "E";
     private String axis               = "PITCH";
+    private String color              = "Red";
 
     public LegoSpikeSensors(ComponentContainer container) {
         super(container.$form());
@@ -85,7 +87,7 @@ public class LegoSpikeSensors extends AndroidNonvisibleComponent
         editorType   = PropertyTypeConstants.PROPERTY_TYPE_CHOICES,
         editorArgs   = {"A", "B", "C", "D", "E", "F"},
         defaultValue = "C")
-    public void ColorSensorPort(@Options(MotorPort.class) String value) {
+    public void ColorSensorPort(@Options(Port.class) String value) {
         if (value != null && value.toUpperCase().trim().matches("[A-F]"))
             colorSensorPort = value.toUpperCase().trim();
     }
@@ -100,7 +102,7 @@ public class LegoSpikeSensors extends AndroidNonvisibleComponent
         editorType   = PropertyTypeConstants.PROPERTY_TYPE_CHOICES,
         editorArgs   = {"A", "B", "C", "D", "E", "F"},
         defaultValue = "D")
-    public void DistanceSensorPort(@Options(MotorPort.class) String value) {
+    public void DistanceSensorPort(@Options(Port.class) String value) {
         if (value != null && value.toUpperCase().trim().matches("[A-F]"))
             distanceSensorPort = value.toUpperCase().trim();
     }
@@ -115,24 +117,24 @@ public class LegoSpikeSensors extends AndroidNonvisibleComponent
         editorType   = PropertyTypeConstants.PROPERTY_TYPE_CHOICES,
         editorArgs   = {"A", "B", "C", "D", "E", "F"},
         defaultValue = "E")
-    public void ForceSensorPort(@Options(MotorPort.class) String value) {
+    public void PressureSensorPort(@Options(Port.class) String value) {
         if (value != null && value.toUpperCase().trim().matches("[A-F]"))
-            forceSensorPort = value.toUpperCase().trim();
+            pressureSensorPort = value.toUpperCase().trim();
     }
 
     @SimpleProperty(category = PropertyCategory.BEHAVIOR,
         description = "Port (A–F) where the force sensor is connected (used by GetPressure and IsPressed)")
-    public String ForceSensorPort() { return forceSensorPort; }
+    public String PressureSensorPort() { return pressureSensorPort; }
 
     // =========================================================================
     // Axis property
     // =========================================================================
     @SimpleProperty(category = PropertyCategory.BEHAVIOR,
-        description = "Hub tilt axis used by GetTiltAngle: PITCH, ROLL, or YAW")
+        description = "Hub tilt axis used by GetTiltAngle: Pitch, Roll, or Yaw")
     @DesignerProperty(
         editorType   = PropertyTypeConstants.PROPERTY_TYPE_CHOICES,
-        editorArgs   = {"PITCH", "ROLL", "YAW"},
-        defaultValue = "PITCH")
+        editorArgs   = {"Pitch", "Roll", "Yaw"},
+        defaultValue = "Pitch")
     public void Axis(@Options(TiltAxis.class) String value) {
         if (value != null) {
             String v = value.trim().toUpperCase();
@@ -143,8 +145,38 @@ public class LegoSpikeSensors extends AndroidNonvisibleComponent
     }
 
     @SimpleProperty(category = PropertyCategory.BEHAVIOR,
-        description = "Hub tilt axis used by GetTiltAngle: PITCH, ROLL, or YAW")
+        description = "Hub tilt axis used by GetTiltAngle: Pitch, Roll, or Yaw")
     public String Axis() { return axis; }
+
+    // =========================================================================
+    // Color comparison property
+    // =========================================================================
+
+    /**
+     * A color constant for comparing against the color parameter in ColorRead events.
+     * Set this to the color you want to detect; compare with the color parameter
+     * returned by the ColorRead event using an equality check.
+     * Colors are in title case (e.g. "Red", "Green") matching the ColorRead event.
+     */
+    @SimpleProperty(category = PropertyCategory.BEHAVIOR,
+        description = "A color constant for comparison in ColorRead events. "
+            + "Compare this with the color parameter from ColorRead.")
+    @DesignerProperty(
+        editorType   = PropertyTypeConstants.PROPERTY_TYPE_CHOICES,
+        editorArgs   = {"Black", "Red", "Green", "Yellow", "Blue", "White",
+                        "Cyan", "Magenta", "Orange", "Violet", "Azure", "None"},
+        defaultValue = "Red")
+    public void Color(@Options(SensorColor.class) String value) {
+        if (value != null && !value.trim().isEmpty()) {
+            String v = value.trim();
+            color = v.substring(0, 1).toUpperCase()
+                  + (v.length() > 1 ? v.substring(1).toLowerCase() : "");
+        }
+    }
+
+    @SimpleProperty(category = PropertyCategory.BEHAVIOR,
+        description = "A color constant for comparison in ColorRead events.")
+    public String Color() { return color; }
 
     // =========================================================================
     // Sensor read functions
@@ -180,7 +212,7 @@ public class LegoSpikeSensors extends AndroidNonvisibleComponent
         "Request the force value from the force sensor on the configured Port. "
         + "Fires PressureRead when the hub responds.")
     public void GetPressure() {
-        sendSensorCommand("SEN:PRS:" + forceSensorPort);
+        sendSensorCommand("SEN:PRS:" + pressureSensorPort);
     }
 
     /**
@@ -191,7 +223,7 @@ public class LegoSpikeSensors extends AndroidNonvisibleComponent
         "Ask whether the force sensor on the configured Port is pressed. "
         + "Fires PressureChecked when the hub responds.")
     public void IsPressed() {
-        sendSensorCommand("SEN:ISP:" + forceSensorPort);
+        sendSensorCommand("SEN:ISP:" + pressureSensorPort);
     }
 
     /**
@@ -199,7 +231,7 @@ public class LegoSpikeSensors extends AndroidNonvisibleComponent
      * Fires TiltAngleRead(axis, degrees) when the hub responds.
      */
     @SimpleFunction(description =
-        "Request the hub tilt angle for the configured Axis (PITCH, ROLL, or YAW). "
+        "Request the hub tilt angle for the configured Axis (Pitch, Roll, or Yaw). "
         + "Fires TiltAngleRead when the hub responds.")
     public void GetTiltAngle() {
         sendSensorCommand("SEN:TLT:" + axis);
@@ -229,7 +261,8 @@ public class LegoSpikeSensors extends AndroidNonvisibleComponent
 
     @SimpleEvent(description =
         "Fired when the hub reports a color reading. "
-        + "color: color name string (e.g. RED, GREEN, BLUE, NONE).")
+        + "color: title-case color name (e.g. Red, Green, Blue, None). "
+        + "Compare with the Color property to check for a specific color.")
     public void ColorRead(String port, String color) {
         EventDispatcher.dispatchEvent(this, "ColorRead", port, color);
     }
@@ -255,7 +288,7 @@ public class LegoSpikeSensors extends AndroidNonvisibleComponent
 
     @SimpleEvent(description =
         "Fired when the hub reports a tilt angle. "
-        + "axis: PITCH, ROLL, or YAW. degrees: angle in degrees.")
+        + "axis: Pitch, Roll, or Yaw. degrees: angle in degrees.")
     public void TiltAngleRead(String axis, int degrees) {
         EventDispatcher.dispatchEvent(this, "TiltAngleRead", axis, degrees);
     }
@@ -280,9 +313,12 @@ public class LegoSpikeSensors extends AndroidNonvisibleComponent
         switch (type) {
             case "CLR":
                 if (parts.length >= 4) {
-                    final String p     = parts[2];
-                    final String color = parts[3];
-                    mainHandler.post(() -> ColorRead(p, color));
+                    final String p   = parts[2];
+                    final String raw = parts[3]; // hub sends uppercase e.g. "RED"
+                    final String titleColor = raw.isEmpty() ? raw
+                        : raw.substring(0, 1).toUpperCase()
+                          + raw.substring(1).toLowerCase(); // "Red"
+                    mainHandler.post(() -> ColorRead(p, titleColor));
                 }
                 break;
             case "DST":
@@ -312,10 +348,13 @@ public class LegoSpikeSensors extends AndroidNonvisibleComponent
                 break;
             case "TLT":
                 if (parts.length >= 4) {
-                    final String ax = parts[2];
+                    final String rawAx = parts[2]; // hub sends "PITCH","ROLL","YAW"
+                    final String titleAx = rawAx.isEmpty() ? rawAx
+                        : rawAx.substring(0, 1).toUpperCase()
+                          + rawAx.substring(1).toLowerCase(); // "Pitch"
                     try {
                         final int degrees = Integer.parseInt(parts[3]);
-                        mainHandler.post(() -> TiltAngleRead(ax, degrees));
+                        mainHandler.post(() -> TiltAngleRead(titleAx, degrees));
                     } catch (NumberFormatException ignored) {}
                 }
                 break;

@@ -3,8 +3,8 @@ package com.google.appinventor.components.common;
 import java.util.HashMap;
 import java.util.Map;
 
-/** Motor port options A–F for the LegoSpikeMotor Port property. */
-public enum MotorPort implements OptionList<String> {
+/** Hub port options A–F used by motor and sensor components. */
+public enum Port implements OptionList<String> {
   A("A"),
   B("B"),
   C("C"),
@@ -14,7 +14,7 @@ public enum MotorPort implements OptionList<String> {
 
   private final String value;
 
-  MotorPort(String value) {
+  Port(String value) {
     this.value = value;
   }
 
@@ -23,15 +23,15 @@ public enum MotorPort implements OptionList<String> {
     return value;
   }
 
-  private static final Map<String, MotorPort> lookup = new HashMap<>();
+  private static final Map<String, Port> lookup = new HashMap<>();
 
   static {
-    for (MotorPort p : MotorPort.values()) {
+    for (Port p : Port.values()) {
       lookup.put(p.toUnderlyingValue(), p);
     }
   }
 
-  public static MotorPort fromUnderlyingValue(String value) {
+  public static Port fromUnderlyingValue(String value) {
     return lookup.get(value);
   }
 }

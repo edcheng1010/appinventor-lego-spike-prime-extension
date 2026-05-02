@@ -5,7 +5,7 @@ import com.google.appinventor.components.annotations.DesignerProperty;
 import com.google.appinventor.components.annotations.Options;
 import com.google.appinventor.components.annotations.PropertyCategory;
 import com.google.appinventor.components.common.MotorDirection;
-import com.google.appinventor.components.common.MotorPort;
+import com.google.appinventor.components.common.Port;
 import com.google.appinventor.components.annotations.SimpleFunction;
 import com.google.appinventor.components.annotations.SimpleObject;
 import com.google.appinventor.components.annotations.SimpleProperty;
@@ -69,7 +69,7 @@ public class LegoSpikeMotors extends AndroidNonvisibleComponent {
         editorType  = PropertyTypeConstants.PROPERTY_TYPE_CHOICES,
         editorArgs  = {"A", "B", "C", "D", "E", "F"},
         defaultValue = "A")
-    public void Port(@Options(MotorPort.class) String value) {
+    public void Port(@Options(Port.class) String value) {
         if (value != null && value.toUpperCase().trim().matches("[A-F]")) {
             port = value.toUpperCase().trim();
         }
