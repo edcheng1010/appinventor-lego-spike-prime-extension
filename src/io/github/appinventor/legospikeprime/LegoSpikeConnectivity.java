@@ -135,16 +135,28 @@ public class LegoSpikeConnectivity extends AndroidNonvisibleComponent {
         "        elif cmd == 'LGT' and len(parts) >= 2:\n" +
         "            sub = parts[1].upper()\n" +
         "            if sub == 'ON' and len(parts) >= 3:\n" +
-        "                light_matrix.show_image(IMAGES.get(parts[2].upper(), 2))\n" +
+        "                _n = parts[2].upper()\n" +
+        "                try:\n" +
+        "                    _img = getattr(light_matrix, 'IMAGE_' + _n)\n" +
+        "                except AttributeError:\n" +
+        "                    _img = IMAGES.get(_n, 2)\n" +
+        "                light_matrix.show_image(_img)\n" +
         "            elif sub == 'OFF':\n" +
-        "                light_matrix.off()\n" +
+        "                for _x in range(5):\n" +
+        "                    for _y in range(5):\n" +
+        "                        light_matrix.set_pixel(_x, _y, 0)\n" +
         "            elif sub == 'TXT' and len(parts) >= 3:\n" +
         "                light_matrix.write(':'.join(parts[2:]))\n" +
         "            elif sub == 'PIX' and len(parts) >= 5:\n" +
         "                light_matrix.set_pixel(int(parts[2]), int(parts[3]), int(parts[4]))\n" +
         "            elif sub == 'BTN' and len(parts) >= 3:\n" +
+        "                _BTN_RGB = {'BLACK':(0,0,0),'RED':(255,0,0),'GREEN':(0,128,0),\n" +
+        "                    'YELLOW':(255,255,0),'BLUE':(0,0,255),'WHITE':(255,255,255),\n" +
+        "                    'CYAN':(0,255,255),'MAGENTA':(255,0,255),\n" +
+        "                    'ORANGE':(255,128,0),'VIOLET':(148,0,211),'AZURE':(0,127,255)}\n" +
+        "                _r,_g,_b = _BTN_RGB.get(parts[2].upper(),(255,255,255))\n" +
         "                try:\n" +
-        "                    hub.led(getattr(color, parts[2].upper()))\n" +
+        "                    hub.led(_r,_g,_b)\n" +
         "                except: pass\n" +
         "        elif cmd == 'SEN' and len(parts) >= 2 and _sensors_ok:\n" +
         "            sub = parts[1].upper()\n" +

@@ -113,16 +113,33 @@ def on_message(data):
         elif cmd == 'LGT' and len(parts) >= 2:
             sub = parts[1].upper()
             if sub == 'ON' and len(parts) >= 3:
-                light_matrix.show_image(IMAGES.get(parts[2].upper(), 2))
+                # Try IMAGE_* constant first (most reliable), fall back to index
+                _n = parts[2].upper()
+                try:
+                    _img = getattr(light_matrix, 'IMAGE_' + _n)
+                except AttributeError:
+                    _img = IMAGES.get(_n, 2)
+                light_matrix.show_image(_img)
             elif sub == 'OFF':
-                light_matrix.off()
+                # Use set_pixel loop — reliable on all firmware versions
+                for _x in range(5):
+                    for _y in range(5):
+                        light_matrix.set_pixel(_x, _y, 0)
             elif sub == 'TXT' and len(parts) >= 3:
                 light_matrix.write(':'.join(parts[2:]))
             elif sub == 'PIX' and len(parts) >= 5:
                 light_matrix.set_pixel(int(parts[2]), int(parts[3]), int(parts[4]))
             elif sub == 'BTN' and len(parts) >= 3:
+                # hub.led() on SPIKE Prime 3.x takes (r, g, b) not a color constant
+                _BTN_RGB = {
+                    'BLACK': (0, 0, 0), 'RED': (255, 0, 0), 'GREEN': (0, 128, 0),
+                    'YELLOW': (255, 255, 0), 'BLUE': (0, 0, 255), 'WHITE': (255, 255, 255),
+                    'CYAN': (0, 255, 255), 'MAGENTA': (255, 0, 255),
+                    'ORANGE': (255, 128, 0), 'VIOLET': (148, 0, 211), 'AZURE': (0, 127, 255)
+                }
+                _r, _g, _b = _BTN_RGB.get(parts[2].upper(), (255, 255, 255))
                 try:
-                    hub.led(getattr(color, parts[2].upper()))
+                    hub.led(_r, _g, _b)
                 except Exception:
                     pass
 
