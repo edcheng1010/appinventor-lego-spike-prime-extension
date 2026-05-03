@@ -48,9 +48,28 @@ tunnel = hub.config['module_tunnel']
 PORTS = {'A': port.A, 'B': port.B, 'C': port.C,
          'D': port.D, 'E': port.E, 'F': port.F}
 
-# Named image index map (hub firmware image indices).
-# Includes both original uppercase-underscore keys and camelCase-uppercase
-# aliases so that value.upper() works for both old and new block values.
+# Map from our image name (upper) to the exact light_matrix.IMAGE_* attribute name.
+# The IMAGE_* constants are the most reliable way to call show_image().
+# Fallback integer indices are kept for firmware that lacks these constants.
+_IMG_CONST = {
+    'HEART':       'IMAGE_HEART',
+    'HEARTSMALL':  'IMAGE_HEART_SMALL',   # underscore in constant name
+    'HAPPY':       'IMAGE_HAPPY',
+    'SMILE':       'IMAGE_SMILE',
+    'SAD':         'IMAGE_SAD',
+    'CONFUSED':    'IMAGE_CONFUSED',
+    'ANGRY':       'IMAGE_ANGRY',
+    'ASLEEP':      'IMAGE_ASLEEP',
+    'SURPRISED':   'IMAGE_SURPRISED',
+    'YES':         'IMAGE_YES',
+    'NO':          'IMAGE_NO',
+    'ARROWNORTH':  'IMAGE_ARROW_N',        # abbreviated in constant name
+    'ARROWEAST':   'IMAGE_ARROW_E',
+    'ARROWSOUTH':  'IMAGE_ARROW_S',
+    'ARROWWEST':   'IMAGE_ARROW_W',
+}
+
+# Integer index fallbacks (used if IMAGE_* constant is not present).
 IMAGES = {
     'HEART': 0,
     'HEART_SMALL': 1, 'HEARTSMALL': 1,
@@ -61,6 +80,14 @@ IMAGES = {
     'ARROW_E': 18, 'ARROWEAST': 18,
     'ARROW_S': 20, 'ARROWSOUTH': 20,
     'ARROW_W': 22, 'ARROWWEST': 22,
+}
+
+# hub.led() color index map (SPIKE Prime 3.x color constants, ~0-10 range).
+# Do NOT use 0-255 RGB — hub.led() takes a single color index, not RGB.
+_HUB_LED = {
+    'BLACK': 0, 'MAGENTA': 1, 'VIOLET': 2, 'BLUE': 3,
+    'AZURE': 4, 'CYAN': 5, 'GREEN': 6, 'YELLOW': 7,
+    'ORANGE': 8, 'RED': 9, 'WHITE': 10,
 }
 
 _timer_start = time.ticks_ms()
@@ -113,11 +140,16 @@ def on_message(data):
         elif cmd == 'LGT' and len(parts) >= 2:
             sub = parts[1].upper()
             if sub == 'ON' and len(parts) >= 3:
-                # Try IMAGE_* constant first (most reliable), fall back to index
                 _n = parts[2].upper()
-                try:
-                    _img = getattr(light_matrix, 'IMAGE_' + _n)
-                except AttributeError:
+                # Look up the exact IMAGE_* constant name (handles underscores
+                # like IMAGE_HEART_SMALL and abbreviations like IMAGE_ARROW_N)
+                _const = _IMG_CONST.get(_n)
+                if _const is not None:
+                    try:
+                        _img = getattr(light_matrix, _const)
+                    except AttributeError:
+                        _img = IMAGES.get(_n, 2)
+                else:
                     _img = IMAGES.get(_n, 2)
                 light_matrix.show_image(_img)
             elif sub == 'OFF':
@@ -130,16 +162,10 @@ def on_message(data):
             elif sub == 'PIX' and len(parts) >= 5:
                 light_matrix.set_pixel(int(parts[2]), int(parts[3]), int(parts[4]))
             elif sub == 'BTN' and len(parts) >= 3:
-                # hub.led() on SPIKE Prime 3.x takes (r, g, b) not a color constant
-                _BTN_RGB = {
-                    'BLACK': (0, 0, 0), 'RED': (255, 0, 0), 'GREEN': (0, 128, 0),
-                    'YELLOW': (255, 255, 0), 'BLUE': (0, 0, 255), 'WHITE': (255, 255, 255),
-                    'CYAN': (0, 255, 255), 'MAGENTA': (255, 0, 255),
-                    'ORANGE': (255, 128, 0), 'VIOLET': (148, 0, 211), 'AZURE': (0, 127, 255)
-                }
-                _r, _g, _b = _BTN_RGB.get(parts[2].upper(), (255, 255, 255))
+                # hub.led(n) takes a single color index (0-10), NOT RGB (0-255).
+                _n = _HUB_LED.get(parts[2].upper(), 10)  # default white
                 try:
-                    hub.led(_r, _g, _b)
+                    hub.led(_n)
                 except Exception:
                     pass
 

@@ -90,15 +90,20 @@ public class LegoSpikeConnectivity extends AndroidNonvisibleComponent {
         "light_matrix.set_pixel(2, 2, 100)\n" +
         "tunnel = hub.config['module_tunnel']\n" +
         "PORTS = {'A': port.A, 'B': port.B, 'C': port.C, 'D': port.D, 'E': port.E, 'F': port.F}\n" +
-        "IMAGES = {'HEART': 0,\n" +
-        "          'HEART_SMALL': 1, 'HEARTSMALL': 1,\n" +
-        "          'HAPPY': 2, 'SMILE': 3, 'SAD': 4,\n" +
-        "          'CONFUSED': 5, 'ANGRY': 6, 'ASLEEP': 7,\n" +
-        "          'SURPRISED': 8, 'YES': 12, 'NO': 13,\n" +
-        "          'ARROW_N': 16, 'ARROWNORTH': 16,\n" +
-        "          'ARROW_E': 18, 'ARROWEAST': 18,\n" +
-        "          'ARROW_S': 20, 'ARROWSOUTH': 20,\n" +
-        "          'ARROW_W': 22, 'ARROWWEST': 22}\n" +
+        "_IMG_CONST = {\n" +
+        "    'HEART':'IMAGE_HEART','HEARTSMALL':'IMAGE_HEART_SMALL',\n" +
+        "    'HAPPY':'IMAGE_HAPPY','SMILE':'IMAGE_SMILE','SAD':'IMAGE_SAD',\n" +
+        "    'CONFUSED':'IMAGE_CONFUSED','ANGRY':'IMAGE_ANGRY','ASLEEP':'IMAGE_ASLEEP',\n" +
+        "    'SURPRISED':'IMAGE_SURPRISED','YES':'IMAGE_YES','NO':'IMAGE_NO',\n" +
+        "    'ARROWNORTH':'IMAGE_ARROW_N','ARROWEAST':'IMAGE_ARROW_E',\n" +
+        "    'ARROWSOUTH':'IMAGE_ARROW_S','ARROWWEST':'IMAGE_ARROW_W'}\n" +
+        "IMAGES = {'HEART':0,'HEART_SMALL':1,'HEARTSMALL':1,\n" +
+        "          'HAPPY':2,'SMILE':3,'SAD':4,'CONFUSED':5,'ANGRY':6,'ASLEEP':7,\n" +
+        "          'SURPRISED':8,'YES':12,'NO':13,\n" +
+        "          'ARROW_N':16,'ARROWNORTH':16,'ARROW_E':18,'ARROWEAST':18,\n" +
+        "          'ARROW_S':20,'ARROWSOUTH':20,'ARROW_W':22,'ARROWWEST':22}\n" +
+        "_HUB_LED={'BLACK':0,'MAGENTA':1,'VIOLET':2,'BLUE':3,'AZURE':4,\n" +
+        "          'CYAN':5,'GREEN':6,'YELLOW':7,'ORANGE':8,'RED':9,'WHITE':10}\n" +
         "_timer_start = time.ticks_ms()\n" +
         "def on_message(data):\n" +
         "    global _timer_start\n" +
@@ -136,9 +141,11 @@ public class LegoSpikeConnectivity extends AndroidNonvisibleComponent {
         "            sub = parts[1].upper()\n" +
         "            if sub == 'ON' and len(parts) >= 3:\n" +
         "                _n = parts[2].upper()\n" +
-        "                try:\n" +
-        "                    _img = getattr(light_matrix, 'IMAGE_' + _n)\n" +
-        "                except AttributeError:\n" +
+        "                _const = _IMG_CONST.get(_n)\n" +
+        "                if _const:\n" +
+        "                    try: _img = getattr(light_matrix, _const)\n" +
+        "                    except AttributeError: _img = IMAGES.get(_n, 2)\n" +
+        "                else:\n" +
         "                    _img = IMAGES.get(_n, 2)\n" +
         "                light_matrix.show_image(_img)\n" +
         "            elif sub == 'OFF':\n" +
@@ -150,13 +157,8 @@ public class LegoSpikeConnectivity extends AndroidNonvisibleComponent {
         "            elif sub == 'PIX' and len(parts) >= 5:\n" +
         "                light_matrix.set_pixel(int(parts[2]), int(parts[3]), int(parts[4]))\n" +
         "            elif sub == 'BTN' and len(parts) >= 3:\n" +
-        "                _BTN_RGB = {'BLACK':(0,0,0),'RED':(255,0,0),'GREEN':(0,128,0),\n" +
-        "                    'YELLOW':(255,255,0),'BLUE':(0,0,255),'WHITE':(255,255,255),\n" +
-        "                    'CYAN':(0,255,255),'MAGENTA':(255,0,255),\n" +
-        "                    'ORANGE':(255,128,0),'VIOLET':(148,0,211),'AZURE':(0,127,255)}\n" +
-        "                _r,_g,_b = _BTN_RGB.get(parts[2].upper(),(255,255,255))\n" +
         "                try:\n" +
-        "                    hub.led(_r,_g,_b)\n" +
+        "                    hub.led(_HUB_LED.get(parts[2].upper(), 10))\n" +
         "                except: pass\n" +
         "        elif cmd == 'SEN' and len(parts) >= 2 and _sensors_ok:\n" +
         "            sub = parts[1].upper()\n" +
