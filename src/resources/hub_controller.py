@@ -25,16 +25,8 @@
 #   SEN:TMR            read timer -> SEN:TMR:3
 #   SEN:TMRR           reset timer
 
-from hub import light_matrix, port
+from hub import light_matrix, port, status_light
 import hub, motor, motor_pair, time
-
-# Try every known path to the center-button LED function.
-# SPIKE Prime 3.x may expose it as a direct import or as hub.led attribute.
-_hub_led = None
-try:
-    from hub import led as _hub_led
-except Exception:
-    _hub_led = getattr(hub, 'led', None)
 
 try:
     import color_sensor, distance_sensor, force_sensor, color
@@ -170,23 +162,20 @@ def on_message(data):
             elif sub == 'PIX' and len(parts) >= 5:
                 light_matrix.set_pixel(int(parts[2]), int(parts[3]), int(parts[4]))
             elif sub == 'BTN' and len(parts) >= 3:
-                # Debug: track exactly what happens and return a diagnostic string.
-                # Java logs it via logDebug("TunnelMessage: DBG:BTN:...").
-                _btn_name = parts[2].upper()
-                if _hub_led is None:
-                    _dbg = 'no_func'
-                else:
+                # status_light is imported directly from hub (same pattern as
+                # light_matrix). status_light.on(color_constant) sets the
+                # circular center button LED color.
+                _bn = parts[2].upper()
+                try:
+                    # Use color module constant; fall back to integer index
+                    # for colours not defined in this firmware (e.g. CYAN, VIOLET)
                     try:
-                        import color as _clr
-                        _c = getattr(_clr, _btn_name, None)
-                        if _c is None:
-                            _dbg = 'no_color_attr'
-                        else:
-                            _hub_led(_c)
-                            _dbg = 'called_ok'
-                    except Exception as _e:
-                        _dbg = 'exc:' + str(_e)[:20]
-                resp = ('DBG:BTN:' + _dbg).encode()
+                        _cc = getattr(color, _bn)
+                    except AttributeError:
+                        _cc = _HUB_LED.get(_bn, 10)
+                    status_light.on(_cc)
+                except Exception:
+                    pass
 
         # --- Sensors ---
         elif cmd == 'SEN' and len(parts) >= 2 and _sensors_ok:

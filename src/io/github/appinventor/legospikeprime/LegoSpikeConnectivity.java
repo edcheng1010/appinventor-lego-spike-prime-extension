@@ -75,13 +75,8 @@ public class LegoSpikeConnectivity extends AndroidNonvisibleComponent {
     //   SEN:TMRR         reset timer
     // =========================================================================
     static final String HUB_CONTROLLER_PROGRAM =
-        "from hub import light_matrix, port\n" +
+        "from hub import light_matrix, port, status_light\n" +
         "import hub, motor, motor_pair, time\n" +
-        "_hub_led = None\n" +
-        "try:\n" +
-        "    from hub import led as _hub_led\n" +
-        "except Exception:\n" +
-        "    _hub_led = getattr(hub, 'led', None)\n" +
         "try:\n" +
         "    import color_sensor, distance_sensor, force_sensor, color\n" +
         "    _clr_map = {}\n" +
@@ -163,23 +158,11 @@ public class LegoSpikeConnectivity extends AndroidNonvisibleComponent {
         "                light_matrix.set_pixel(int(parts[2]), int(parts[3]), int(parts[4]))\n" +
         "            elif sub == 'BTN' and len(parts) >= 3:\n" +
         "                _bn = parts[2].upper()\n" +
-        "                _res = []\n" +
         "                try:\n" +
-        "                    import color as _c2\n" +
-        "                    _cc = getattr(_c2, _bn)\n" +
-        "                    if _hub_led is not None:\n" +
-        "                        _hub_led(_cc)\n" +
-        "                        _res.append('led_ok')\n" +
-        "                    else:\n" +
-        "                        _res.append('led_none')\n" +
-        "                    try:\n" +
-        "                        hub.status_light.on(_cc)\n" +
-        "                        _res.append('sl_ok')\n" +
-        "                    except Exception as _e2:\n" +
-        "                        _res.append('sl:'+str(_e2)[:12])\n" +
-        "                except Exception as _e:\n" +
-        "                    _res.append('err:'+str(_e)[:15])\n" +
-        "                resp = ('DBG:BTN:'+':'.join(_res)).encode()\n" +
+        "                    try: _cc = getattr(color, _bn)\n" +
+        "                    except AttributeError: _cc = _HUB_LED.get(_bn, 10)\n" +
+        "                    status_light.on(_cc)\n" +
+        "                except: pass\n" +
         "        elif cmd == 'SEN' and len(parts) >= 2 and _sensors_ok:\n" +
         "            sub = parts[1].upper()\n" +
         "            if sub == 'CLR' and len(parts) >= 3:\n" +
@@ -872,10 +855,7 @@ public class LegoSpikeConnectivity extends AndroidNonvisibleComponent {
                         String text = new String(raw, 3, payloadSize,
                             java.nio.charset.StandardCharsets.UTF_8).trim();
                         logDebug("TunnelMessage: " + text);
-                        // DBG: prefixed messages surface as ErrorOccurred for diagnosis
-                        if (text.startsWith("DBG:")) {
-                            ErrorOccurred("[Hub debug] " + text);
-                        } else if (!"rdy".equals(text) && !"err".equals(text)) {
+                        if (!"rdy".equals(text) && !"err".equals(text)) {
                             for (HubDataListener l : new ArrayList<>(dataListeners)) {
                                 l.onHubData(text);
                             }

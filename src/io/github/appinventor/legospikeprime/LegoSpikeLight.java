@@ -80,7 +80,7 @@ public class LegoSpikeLight extends AndroidNonvisibleComponent {
     @DesignerProperty(
         editorType   = PropertyTypeConstants.PROPERTY_TYPE_CHOICES,
         editorArgs   = {"Black", "Red", "Green", "Yellow", "Blue", "White",
-                        "Cyan", "Magenta", "Orange", "Violet", "Azure"},
+                        "Magenta", "Orange", "Azure"},
         defaultValue = "White")
     public void ButtonColor(@Options(HubLightColor.class) String value) {
         if (value != null && !value.trim().isEmpty()) {

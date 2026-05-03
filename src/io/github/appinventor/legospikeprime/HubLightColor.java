@@ -4,11 +4,21 @@ import com.google.appinventor.components.common.OptionList;
 import java.util.HashMap;
 import java.util.Map;
 
-/** Color options for LegoSpikeLight.ButtonColor. */
+/**
+ * Color options for LegoSpikeLight.SetCenterButtonLight.
+ * Only includes colours confirmed present in the SPIKE Prime 3.x color module.
+ * (CYAN and VIOLET are absent from the firmware's color module.)
+ */
 public enum HubLightColor implements OptionList<String> {
-  Black("Black"), Red("Red"), Green("Green"), Yellow("Yellow"),
-  Blue("Blue"), White("White"), Cyan("Cyan"), Magenta("Magenta"),
-  Orange("Orange"), Violet("Violet"), Azure("Azure");
+  Black("Black"),
+  Red("Red"),
+  Green("Green"),
+  Yellow("Yellow"),
+  Blue("Blue"),
+  White("White"),
+  Magenta("Magenta"),
+  Orange("Orange"),
+  Azure("Azure");
 
   private final String value;
   HubLightColor(String v) { this.value = v; }
