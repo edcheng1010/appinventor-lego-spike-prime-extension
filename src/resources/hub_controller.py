@@ -91,10 +91,11 @@ _HUB_LED = {
 }
 
 _timer_start = time.ticks_ms()
+_pending_light = None
 
 
 def on_message(data):
-    global _timer_start
+    global _timer_start, _pending_light
     if not isinstance(data, str):
         data = ''.join(chr(b) for b in data)
 
@@ -162,15 +163,11 @@ def on_message(data):
             elif sub == 'PIX' and len(parts) >= 5:
                 light_matrix.set_pixel(int(parts[2]), int(parts[3]), int(parts[4]))
             elif sub == 'BTN' and len(parts) >= 3:
-                # hub.light.color(n) is the correct API on SPIKE Prime 3.x
-                # (hub.light dir: ['CONNECT', 'POWER', 'color'])
+                # Defer hub.light.color() to the main loop — some hub functions
+                # only take effect when called outside a BLE callback.
                 _bn = parts[2].upper()
-                try:
-                    try: _cc = getattr(color, _bn)
-                    except AttributeError: _cc = _HUB_LED.get(_bn, 10)
-                    hub.light.color(_cc)
-                except Exception:
-                    pass
+                try: _pending_light = getattr(color, _bn)
+                except AttributeError: _pending_light = _HUB_LED.get(_bn, 10)
 
         # --- Sensors ---
         elif cmd == 'SEN' and len(parts) >= 2 and _sensors_ok:
@@ -244,4 +241,7 @@ tunnel.callback(on_message)
 tunnel.send(b'rdy')
 
 while True:
-    pass
+    if _pending_light is not None:
+        try: hub.light.color(_pending_light)
+        except: pass
+        _pending_light = None

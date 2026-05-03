@@ -105,8 +105,9 @@ public class LegoSpikeConnectivity extends AndroidNonvisibleComponent {
         "_HUB_LED={'BLACK':0,'MAGENTA':1,'VIOLET':2,'BLUE':3,'AZURE':4,\n" +
         "          'CYAN':5,'GREEN':6,'YELLOW':7,'ORANGE':8,'RED':9,'WHITE':10}\n" +
         "_timer_start = time.ticks_ms()\n" +
+        "_pending_light = None\n" +
         "def on_message(data):\n" +
-        "    global _timer_start\n" +
+        "    global _timer_start, _pending_light\n" +
         "    if not isinstance(data, str):\n" +
         "        data = ''.join(chr(b) for b in data)\n" +
         "    parts = data.split(':')\n" +
@@ -158,11 +159,8 @@ public class LegoSpikeConnectivity extends AndroidNonvisibleComponent {
         "                light_matrix.set_pixel(int(parts[2]), int(parts[3]), int(parts[4]))\n" +
         "            elif sub == 'BTN' and len(parts) >= 3:\n" +
         "                _bn = parts[2].upper()\n" +
-        "                try:\n" +
-        "                    try: _cc = getattr(color, _bn)\n" +
-        "                    except AttributeError: _cc = _HUB_LED.get(_bn, 10)\n" +
-        "                    hub.light.color(_cc)\n" +
-        "                except: pass\n" +
+        "                try: _pending_light = getattr(color, _bn)\n" +
+        "                except: _pending_light = _HUB_LED.get(_bn, 10)\n" +
         "        elif cmd == 'SEN' and len(parts) >= 2 and _sensors_ok:\n" +
         "            sub = parts[1].upper()\n" +
         "            if sub == 'CLR' and len(parts) >= 3:\n" +
@@ -210,7 +208,10 @@ public class LegoSpikeConnectivity extends AndroidNonvisibleComponent {
         "tunnel.callback(on_message)\n" +
         "tunnel.send(b'rdy')\n" +
         "while True:\n" +
-        "    pass\n";
+        "    if _pending_light is not None:\n" +
+        "        try: hub.light.color(_pending_light)\n" +
+        "        except: pass\n" +
+        "        _pending_light = None\n";
 
     // =========================================================================
     // HubDataListener — implemented by sub-components that need hub responses
