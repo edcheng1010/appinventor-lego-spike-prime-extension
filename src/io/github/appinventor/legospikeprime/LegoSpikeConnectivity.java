@@ -87,7 +87,6 @@ public class LegoSpikeConnectivity extends AndroidNonvisibleComponent {
         "except:\n" +
         "    _sensors_ok = False\n" +
         "    _clr_map = {}\n" +
-        "light_matrix.set_pixel(2, 2, 100)\n" +
         "tunnel = hub.config['module_tunnel']\n" +
         "PORTS = {'A': port.A, 'B': port.B, 'C': port.C, 'D': port.D, 'E': port.E, 'F': port.F}\n" +
         "_IMG_CONST = {\n" +
@@ -102,12 +101,9 @@ public class LegoSpikeConnectivity extends AndroidNonvisibleComponent {
         "          'SURPRISED':8,'YES':12,'NO':13,\n" +
         "          'ARROW_N':16,'ARROWNORTH':16,'ARROW_E':18,'ARROWEAST':18,\n" +
         "          'ARROW_S':20,'ARROWSOUTH':20,'ARROW_W':22,'ARROWWEST':22}\n" +
-        "_HUB_LED={'BLACK':0,'MAGENTA':1,'VIOLET':2,'BLUE':3,'AZURE':4,\n" +
-        "          'CYAN':5,'GREEN':6,'YELLOW':7,'ORANGE':8,'RED':9,'WHITE':10}\n" +
         "_timer_start = time.ticks_ms()\n" +
-        "_pending_light = None\n" +
         "def on_message(data):\n" +
-        "    global _timer_start, _pending_light\n" +
+        "    global _timer_start\n" +
         "    if not isinstance(data, str):\n" +
         "        data = ''.join(chr(b) for b in data)\n" +
         "    parts = data.split(':')\n" +
@@ -126,17 +122,25 @@ public class LegoSpikeConnectivity extends AndroidNonvisibleComponent {
         "                    motor.run(PORTS[p], spd)\n" +
         "        elif cmd == 'MOV' and len(parts) >= 2:\n" +
         "            sub = parts[1].upper()\n" +
-        "            if sub == 'PAIR' and len(parts) >= 4:\n" +
-        "                lp, rp = parts[2].upper(), parts[3].upper()\n" +
+        "            if sub == 'FWD' and len(parts) >= 5:\n" +
+        "                lp,rp = parts[2].upper(),parts[3].upper()\n" +
         "                if lp in PORTS and rp in PORTS:\n" +
-        "                    motor_pair.pair(motor_pair.PAIR_1, PORTS[lp], PORTS[rp])\n" +
-        "            elif sub == 'FWD' and len(parts) >= 3:\n" +
-        "                motor_pair.move(motor_pair.PAIR_1, 0, velocity=int(parts[2]) * 11)\n" +
-        "            elif sub == 'BWD' and len(parts) >= 3:\n" +
-        "                motor_pair.move(motor_pair.PAIR_1, 0, velocity=-(int(parts[2]) * 11))\n" +
-        "            elif sub == 'STEER' and len(parts) >= 4:\n" +
-        "                motor_pair.move(motor_pair.PAIR_1, int(parts[2]), velocity=int(parts[3]) * 11)\n" +
+        "                    motor_pair.pair(motor_pair.PAIR_1,PORTS[lp],PORTS[rp])\n" +
+        "                    motor_pair.move(motor_pair.PAIR_1,0,velocity=int(parts[4])*11)\n" +
+        "            elif sub == 'BWD' and len(parts) >= 5:\n" +
+        "                lp,rp = parts[2].upper(),parts[3].upper()\n" +
+        "                if lp in PORTS and rp in PORTS:\n" +
+        "                    motor_pair.pair(motor_pair.PAIR_1,PORTS[lp],PORTS[rp])\n" +
+        "                    motor_pair.move(motor_pair.PAIR_1,0,velocity=-(int(parts[4])*11))\n" +
+        "            elif sub == 'STEER' and len(parts) >= 6:\n" +
+        "                lp,rp = parts[2].upper(),parts[3].upper()\n" +
+        "                if lp in PORTS and rp in PORTS:\n" +
+        "                    motor_pair.pair(motor_pair.PAIR_1,PORTS[lp],PORTS[rp])\n" +
+        "                    motor_pair.move(motor_pair.PAIR_1,int(parts[4]),velocity=int(parts[5])*11)\n" +
         "            elif sub == 'STOP':\n" +
+        "                if len(parts)>=4:\n" +
+        "                    lp,rp=parts[2].upper(),parts[3].upper()\n" +
+        "                    if lp in PORTS and rp in PORTS: motor_pair.pair(motor_pair.PAIR_1,PORTS[lp],PORTS[rp])\n" +
         "                motor_pair.stop(motor_pair.PAIR_1)\n" +
         "        elif cmd == 'LGT' and len(parts) >= 2:\n" +
         "            sub = parts[1].upper()\n" +
@@ -157,10 +161,6 @@ public class LegoSpikeConnectivity extends AndroidNonvisibleComponent {
         "                light_matrix.write(':'.join(parts[2:]))\n" +
         "            elif sub == 'PIX' and len(parts) >= 5:\n" +
         "                light_matrix.set_pixel(int(parts[2]), int(parts[3]), int(parts[4]))\n" +
-        "            elif sub == 'BTN' and len(parts) >= 3:\n" +
-        "                _bn = parts[2].upper()\n" +
-        "                try: _pending_light = getattr(color, _bn)\n" +
-        "                except: _pending_light = _HUB_LED.get(_bn, 10)\n" +
         "        elif cmd == 'SEN' and len(parts) >= 2 and _sensors_ok:\n" +
         "            sub = parts[1].upper()\n" +
         "            if sub == 'CLR' and len(parts) >= 3:\n" +
@@ -208,10 +208,7 @@ public class LegoSpikeConnectivity extends AndroidNonvisibleComponent {
         "tunnel.callback(on_message)\n" +
         "tunnel.send(b'rdy')\n" +
         "while True:\n" +
-        "    if _pending_light is not None:\n" +
-        "        try: hub.light.color(_pending_light)\n" +
-        "        except: pass\n" +
-        "        _pending_light = None\n";
+        "    pass\n";
 
     // =========================================================================
     // HubDataListener — implemented by sub-components that need hub responses
@@ -244,7 +241,7 @@ public class LegoSpikeConnectivity extends AndroidNonvisibleComponent {
     private String connectedDeviceName    = "";
 
     private int maxPacketSize = DEFAULT_MAX_PACKET_SIZE;
-    private int maxChunkSize  = 445;
+    private int maxChunkSize  = 960;
 
     private volatile boolean uploadInProgress = false;
     private final java.util.concurrent.LinkedBlockingQueue<byte[]> uploadResponseQueue =

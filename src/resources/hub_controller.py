@@ -42,7 +42,6 @@ except Exception:
     _sensors_ok = False
     _clr_map = {}
 
-light_matrix.set_pixel(2, 2, 100)   # centre LED = program running
 tunnel = hub.config['module_tunnel']
 
 PORTS = {'A': port.A, 'B': port.B, 'C': port.C,
@@ -82,20 +81,11 @@ IMAGES = {
     'ARROW_W': 22, 'ARROWWEST': 22,
 }
 
-# hub.led() color index map (SPIKE Prime 3.x color constants, ~0-10 range).
-# Do NOT use 0-255 RGB — hub.led() takes a single color index, not RGB.
-_HUB_LED = {
-    'BLACK': 0, 'MAGENTA': 1, 'VIOLET': 2, 'BLUE': 3,
-    'AZURE': 4, 'CYAN': 5, 'GREEN': 6, 'YELLOW': 7,
-    'ORANGE': 8, 'RED': 9, 'WHITE': 10,
-}
-
 _timer_start = time.ticks_ms()
-_pending_light = None
 
 
 def on_message(data):
-    global _timer_start, _pending_light
+    global _timer_start
     if not isinstance(data, str):
         data = ''.join(chr(b) for b in data)
 
@@ -119,22 +109,30 @@ def on_message(data):
                     motor.run(PORTS[p], spd)
 
         # --- Movement ---
+        # Ports are embedded in every command (MOV:FWD:A:B:050) so mid-program
+        # port changes take effect immediately — same pattern as Motors.
         elif cmd == 'MOV' and len(parts) >= 2:
             sub = parts[1].upper()
-            if sub == 'PAIR' and len(parts) >= 4:
+            if sub == 'FWD' and len(parts) >= 5:
                 lp, rp = parts[2].upper(), parts[3].upper()
                 if lp in PORTS and rp in PORTS:
                     motor_pair.pair(motor_pair.PAIR_1, PORTS[lp], PORTS[rp])
-            elif sub == 'FWD' and len(parts) >= 3:
-                motor_pair.move(motor_pair.PAIR_1, 0, velocity=int(parts[2]) * 11)
-            elif sub == 'BWD' and len(parts) >= 3:
-                motor_pair.move(motor_pair.PAIR_1, 0, velocity=-(int(parts[2]) * 11))
-            elif sub == 'STEER' and len(parts) >= 4:
-                # parts[2] is signed steering e.g. "+50" or "-50"
-                steering = int(parts[2])
-                spd = int(parts[3]) * 11
-                motor_pair.move(motor_pair.PAIR_1, steering, velocity=spd)
+                    motor_pair.move(motor_pair.PAIR_1, 0, velocity=int(parts[4]) * 11)
+            elif sub == 'BWD' and len(parts) >= 5:
+                lp, rp = parts[2].upper(), parts[3].upper()
+                if lp in PORTS and rp in PORTS:
+                    motor_pair.pair(motor_pair.PAIR_1, PORTS[lp], PORTS[rp])
+                    motor_pair.move(motor_pair.PAIR_1, 0, velocity=-(int(parts[4]) * 11))
+            elif sub == 'STEER' and len(parts) >= 6:
+                lp, rp = parts[2].upper(), parts[3].upper()
+                if lp in PORTS and rp in PORTS:
+                    motor_pair.pair(motor_pair.PAIR_1, PORTS[lp], PORTS[rp])
+                    motor_pair.move(motor_pair.PAIR_1, int(parts[4]), velocity=int(parts[5]) * 11)
             elif sub == 'STOP':
+                if len(parts) >= 4:
+                    lp, rp = parts[2].upper(), parts[3].upper()
+                    if lp in PORTS and rp in PORTS:
+                        motor_pair.pair(motor_pair.PAIR_1, PORTS[lp], PORTS[rp])
                 motor_pair.stop(motor_pair.PAIR_1)
 
         # --- Light ---
@@ -162,13 +160,6 @@ def on_message(data):
                 light_matrix.write(':'.join(parts[2:]))
             elif sub == 'PIX' and len(parts) >= 5:
                 light_matrix.set_pixel(int(parts[2]), int(parts[3]), int(parts[4]))
-            elif sub == 'BTN' and len(parts) >= 3:
-                # Defer hub.light.color() to the main loop — some hub functions
-                # only take effect when called outside a BLE callback.
-                _bn = parts[2].upper()
-                try: _pending_light = getattr(color, _bn)
-                except AttributeError: _pending_light = _HUB_LED.get(_bn, 10)
-
         # --- Sensors ---
         elif cmd == 'SEN' and len(parts) >= 2 and _sensors_ok:
             sub = parts[1].upper()
@@ -241,7 +232,4 @@ tunnel.callback(on_message)
 tunnel.send(b'rdy')
 
 while True:
-    if _pending_light is not None:
-        try: hub.light.color(_pending_light)
-        except: pass
-        _pending_light = None
+    pass

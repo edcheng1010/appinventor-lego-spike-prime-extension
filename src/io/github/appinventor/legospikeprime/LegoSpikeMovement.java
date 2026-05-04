@@ -139,50 +139,30 @@ public class LegoSpikeMovement extends AndroidNonvisibleComponent {
      * Automatically pairs LeftPort and RightPort before moving.
      */
     @SimpleFunction(description =
-        "Start moving the drivebase using the configured Direction and speed. "
-        + "Automatically applies the configured LeftPort and RightPort.")
+        "Start moving the drivebase using the configured Direction and speed.")
     public void StartMoving() {
         if (!checkConnected()) return;
-        sendPair();
         String cmd = direction.equalsIgnoreCase("forward")
-            ? String.format("MOV:FWD:%03d", movementSpeed)
-            : String.format("MOV:BWD:%03d", movementSpeed);
+            ? String.format("MOV:FWD:%s:%s:%03d", leftPort, rightPort, movementSpeed)
+            : String.format("MOV:BWD:%s:%s:%03d", leftPort, rightPort, movementSpeed);
         connectivity.sendCommand(cmd);
     }
 
-    /**
-     * Start moving with a steering offset.
-     * steering = 0: straight. steering = -100: full left. steering = +100: full right.
-     * Automatically pairs LeftPort and RightPort before moving.
-     *
-     * @param steering –100 to +100
-     */
     @SimpleFunction(description =
-        "Start moving with steering (–100 to +100, 0 = straight). "
-        + "Automatically applies the configured LeftPort and RightPort.")
+        "Start moving with steering (–100 to +100, 0 = straight).")
     public void StartMovingWithSteering(int steering) {
         if (!checkConnected()) return;
-        sendPair();
         steering = Math.max(-100, Math.min(100, steering));
         int speed = direction.equalsIgnoreCase("backward") ? -movementSpeed : movementSpeed;
-        connectivity.sendCommand(String.format("MOV:STEER:%+d:%d", steering, speed));
+        connectivity.sendCommand(
+            String.format("MOV:STEER:%s:%s:%+d:%d", leftPort, rightPort, steering, speed));
     }
 
     /** Stop the drivebase immediately. */
     @SimpleFunction(description = "Stop the drivebase immediately")
     public void StopMoving() {
         if (!checkConnected()) return;
-        sendPair();
-        connectivity.sendCommand("MOV:STOP");
-    }
-
-    // =========================================================================
-    // Helpers
-    // =========================================================================
-
-    /** Sends MOV:PAIR to the hub using the current LeftPort and RightPort values. */
-    private void sendPair() {
-        connectivity.sendCommand("MOV:PAIR:" + leftPort + ":" + rightPort);
+        connectivity.sendCommand("MOV:STOP:" + leftPort + ":" + rightPort);
     }
 
     private boolean checkConnected() {
