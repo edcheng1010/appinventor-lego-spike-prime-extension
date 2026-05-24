@@ -1,7 +1,7 @@
 # Claude Code Project Memory
 
 ## Project Context
-This is an MIT App Inventor extension for LEGO SPIKE Prime hubs, developed for the MIT Hong Kong Innovation Node. The goal is to provide a highly reliable, crash-free Bluetooth Low Energy (BLE) connection experience for classrooms with multiple hubs.
+This is an MIT App Inventor extension for LEGO SPIKE Prime hubs, developed by Edward Cheng. The goal is to provide a highly reliable, crash-free Bluetooth Low Energy (BLE) connection experience for classrooms with multiple hubs.
 
 ## Critical Architectural Rules (DO NOT VIOLATE)
 

@@ -1,2 +1,100 @@
-# appinventor-lego-spike-prime-extension
-MIT App Inventor Extension for LEGO SPIKE Prime BLE communication - MIT Hong Kong Innovation Node
+# LEGO SPIKE Prime — App Inventor BLE Extension
+
+A multi-component App Inventor extension that enables real-time Bluetooth Low Energy communication with LEGO SPIKE Prime hubs. Control motors, read sensors, and drive the LED matrix — all from App Inventor blocks on your phone or tablet.
+
+[![License: Apache 2.0](https://img.shields.io/badge/License-Apache_2.0-blue.svg)](https://opensource.org/licenses/Apache-2.0)
+
+> Part of the [Solaria](https://github.com/edcheng1010/solaria-hub) open-source robotics platform.
+
+---
+
+## Features
+
+- **BLE scanning with ghost-device filtering** — RSSI staleness detection ensures only powered-on hubs appear in the device list
+- **Multi-hub classroom support** — designed for environments with many hubs operating simultaneously
+- **SPIKE Prime 3.x protocol** — uses the correct TunnelMessage architecture (program upload + real-time commands)
+- **COBS encoding** — full implementation of LEGO's custom framing protocol
+- **Modular component design** — separate blocks for Connectivity, Motors, Movement, Light, and Sensors
+
+## Components
+
+| Component | Purpose |
+| --- | --- |
+| `LegoSpikeConnectivity` | BLE scanning, connection, hub management |
+| `LegoSpikeMotors` | Individual motor control (speed, position, stall detection) |
+| `LegoSpikeMovement` | Coordinated drive base movement |
+| `LegoSpikeLight` | LED matrix and status light control |
+| `LegoSpikeSensors` | Color, distance, force, and tilt sensor readings |
+
+## Requirements
+
+- Android device with BLE support (API 18+)
+- [MIT App Inventor](https://ai2.appinventor.mit.edu)
+- MIT App Inventor BluetoothLE extension (`.aix`) — must be added to your project separately
+- LEGO SPIKE Prime hub with firmware 3.x
+
+## Quick Start
+
+1. Download the latest `.aix` release from [Releases](../../releases).
+2. In App Inventor, go to **Extensions → Import Extension** → upload the `.aix` file.
+3. Also import the [MIT BluetoothLE extension](https://mit-cml.github.io/extensions/).
+4. Wire the required events in your blocks:
+   - `BluetoothLE1.BytesReceived` → `LegoSpikeConnectivity1.OnBytesReceivedFromHub`
+   - `BluetoothLE1.ConnectionFailed` → `LegoSpikeConnectivity1.OnConnectionFailed`
+5. Use `LegoSpikeConnectivity1.StartScanning` to find nearby hubs.
+6. Connect, and start controlling your robot!
+
+## How It Works
+
+SPIKE Prime 3.x uses a two-part communication architecture:
+
+1. **Program Upload** — the extension uploads a lightweight Python controller program to the hub
+2. **TunnelMessage** — real-time commands are sent through a bidirectional tunnel between the app and the running Python program
+
+This is different from older LEGO hubs (Boost, SPIKE Essential) which accept direct BLE commands. See [ARCHITECTURE.md](ARCHITECTURE.md) for the full technical breakdown.
+
+## Project Status
+
+This extension is in active development (MVP phase). Current state:
+
+- [x] BLE scanning and connection (stable)
+- [x] Ghost device filtering via RSSI staleness
+- [x] COBS encoding/decoding
+- [x] Program upload protocol (ClearSlot → StartFileUpload → TransferChunk → ProgramFlow)
+- [x] TunnelMessage send/receive
+- [ ] Full motor control API (in progress)
+- [ ] Sensor streaming (in progress)
+- [ ] LED matrix patterns (in progress)
+- [ ] Multi-hub simultaneous control (planned)
+
+## Building from Source
+
+Prerequisites:
+
+- Java JDK 8+
+- Apache Ant
+- App Inventor source tree (for extension compilation)
+
+```bash
+ant build
+```
+
+See [docs/COMPILATION_AND_DEBUGGING.md](docs/COMPILATION_AND_DEBUGGING.md) for detailed build instructions.
+
+## Contributing
+
+Contributions are welcome! Please read [CONTRIBUTING.md](CONTRIBUTING.md) before submitting a PR.
+
+If you're interested in building bridges for other hardware platforms, check out the [Solaria project](https://github.com/edcheng1010/solaria-hub).
+
+## License
+
+Apache License 2.0 — see [LICENSE](LICENSE) for the full text.
+
+Copyright © 2026 Edward Cheng
+
+## Acknowledgements
+
+- [LEGO SPIKE Prime Protocol Documentation](https://lego.github.io/spike-prime-docs/)
+- [etomasfe/SpikeRemoteControl](https://github.com/etomasfe/SpikeRemoteControl) — WebBluetooth reference implementation
+- [MIT App Inventor](https://appinventor.mit.edu/) — the block-based programming platform
