@@ -1,5 +1,7 @@
 # Implementation Plan — LEGO SPIKE Prime App Inventor Extension
 
+> **Unofficial integration.** Independent open-source project, not affiliated with the LEGO Group or the Massachusetts Institute of Technology. See [NOTICE](../NOTICE) for trademark and licensing details.
+
 **Last revised:** 2026-05-24
 **Targeting:** SSP v0.6
 **Status:** Phase 1 complete · Phase 2 next

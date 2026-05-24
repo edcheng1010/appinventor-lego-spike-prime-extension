@@ -1,5 +1,7 @@
 # Claude Code Project Memory
 
+> **Unofficial integration.** Independent open-source project, not affiliated with the LEGO Group or the Massachusetts Institute of Technology. See [NOTICE](NOTICE) for trademark and licensing details.
+
 ## Project Context
 This is an MIT App Inventor extension for LEGO SPIKE Prime hubs, developed by Edward Cheng. The goal is to provide a highly reliable, crash-free Bluetooth Low Energy (BLE) connection experience for classrooms with multiple hubs.
 

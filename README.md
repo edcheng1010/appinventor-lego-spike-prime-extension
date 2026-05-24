@@ -6,6 +6,8 @@ A multi-component App Inventor extension that enables real-time Bluetooth Low En
 
 > Part of the [Solaria](https://github.com/edcheng1010/solaria-hub) open-source robotics platform.
 
+> **Unofficial integration.** This is an independent open-source project. It is **not affiliated with, endorsed by, or sponsored by the LEGO Group or the Massachusetts Institute of Technology.** "LEGO", "SPIKE Prime", and "App Inventor" are trademarks of their respective owners; references in this project are nominative — used solely to describe hardware compatibility. See [NOTICE](NOTICE) for full trademark and licensing notices.
+
 ---
 
 ## Features

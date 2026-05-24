@@ -1,3 +1,5 @@
+> *Unofficial — independent open-source project, not affiliated with the LEGO Group or the Massachusetts Institute of Technology. See [NOTICE](../../NOTICE) for trademark and licensing details.*
+
 # Strategic Implementation Plan for Claude Code
 
 Based on the exhaustive analysis of all 41 documentation sources, here is the step-by-step, highly strategic implementation plan for Claude Code. This plan is designed to minimize token usage, prevent hallucinations, and ensure each step is testable before moving to the next.

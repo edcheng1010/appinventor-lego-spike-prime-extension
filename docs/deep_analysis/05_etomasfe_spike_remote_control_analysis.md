@@ -1,3 +1,5 @@
+> *Unofficial — independent open-source project, not affiliated with the LEGO Group or the Massachusetts Institute of Technology. See [NOTICE](../../NOTICE) for trademark and licensing details.*
+
 # etomasfe/SpikeRemoteControl — Line-by-Line Analysis
 
 ## THIS IS THE ONLY PROVEN WORKING IMPLEMENTATION FOR REMOTE MOTOR CONTROL

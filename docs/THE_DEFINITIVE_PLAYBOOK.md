@@ -1,3 +1,5 @@
+> *Unofficial — independent open-source project, not affiliated with the LEGO Group or the Massachusetts Institute of Technology. See [NOTICE](../NOTICE) for trademark and licensing details.*
+
 # The Definitive Claude Code Playbook
 
 **Date:** April 26, 2026

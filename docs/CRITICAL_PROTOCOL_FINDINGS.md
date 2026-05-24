@@ -1,3 +1,5 @@
+> *Unofficial — independent open-source project, not affiliated with the LEGO Group or the Massachusetts Institute of Technology. See [NOTICE](../NOTICE) for trademark and licensing details.*
+
 # CRITICAL FINDINGS: SPIKE Prime 3.x BLE Protocol
 ## Date: 2026-04-25
 

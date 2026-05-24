@@ -1,3 +1,5 @@
+> *Unofficial — independent open-source project, not affiliated with the LEGO Group or the Massachusetts Institute of Technology. See [NOTICE](../../NOTICE) for trademark and licensing details.*
+
 # Official SPIKE Prime Protocol — Complete Analysis
 
 ## Source: LEGO/spike-prime-docs (all .rst files)

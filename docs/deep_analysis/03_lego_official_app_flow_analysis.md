@@ -1,3 +1,5 @@
+> *Unofficial — independent open-source project, not affiliated with the LEGO Group or the Massachusetts Institute of Technology. See [NOTICE](../../NOTICE) for trademark and licensing details.*
+
 # LEGO Official app.py — Line-by-Line Flow Analysis
 
 ## UUIDs (AUTHORITATIVE — confirmed in source code)

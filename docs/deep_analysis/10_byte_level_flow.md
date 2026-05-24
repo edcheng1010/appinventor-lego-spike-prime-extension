@@ -1,3 +1,5 @@
+> *Unofficial — independent open-source project, not affiliated with the LEGO Group or the Massachusetts Institute of Technology. See [NOTICE](../../NOTICE) for trademark and licensing details.*
+
 # SPIKE Prime 3.x BLE Protocol: Exact Byte-Level Flow
 
 Based on the exhaustive analysis of all 41 sources, here is the exact, verified byte-level flow required to control a SPIKE Prime 3.x hub from an App Inventor extension.

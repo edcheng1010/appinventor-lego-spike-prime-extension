@@ -1,5 +1,7 @@
 # LEGO SPIKE Prime App Inventor Extension - Architecture Document
 
+> **Unofficial integration.** This is an independent open-source project. It is **not affiliated with, endorsed by, or sponsored by the LEGO Group or the Massachusetts Institute of Technology.** "LEGO", "SPIKE Prime", and "App Inventor" are trademarks of their respective owners; references in this project are nominative — used solely to describe hardware compatibility. See [NOTICE](NOTICE) for full trademark and licensing notices.
+
 ## 1. Project Overview
 This project is an MIT App Inventor extension designed to provide reliable, intuitive Bluetooth Low Energy (BLE) communication with LEGO SPIKE Prime hubs. It is built specifically for educational environments (classrooms, maker spaces) where multiple hubs operate simultaneously and reliability is paramount.
 

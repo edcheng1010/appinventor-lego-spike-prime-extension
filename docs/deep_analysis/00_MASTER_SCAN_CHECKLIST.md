@@ -1,3 +1,5 @@
+> *Unofficial — independent open-source project, not affiliated with the LEGO Group or the Massachusetts Institute of Technology. See [NOTICE](../../NOTICE) for trademark and licensing details.*
+
 # MASTER SCAN CHECKLIST — ALL 41 Sources
 
 ## Category 1: Official LEGO Documentation (8 sources)

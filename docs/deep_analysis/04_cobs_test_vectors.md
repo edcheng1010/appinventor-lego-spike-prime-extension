@@ -1,3 +1,5 @@
+> *Unofficial — independent open-source project, not affiliated with the LEGO Group or the Massachusetts Institute of Technology. See [NOTICE](../../NOTICE) for trademark and licensing details.*
+
 # COBS Test Vectors (from LEGO official test_cobs.py)
 
 These test vectors are AUTHORITATIVE. Our Java COBSEncoder MUST produce identical output.

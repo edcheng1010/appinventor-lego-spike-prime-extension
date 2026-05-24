@@ -1,3 +1,5 @@
+> *Unofficial — independent open-source project, not affiliated with the LEGO Group or the Massachusetts Institute of Technology. See [NOTICE](../../NOTICE) for trademark and licensing details.*
+
 # LEGO Official cobs.py — Line-by-Line Analysis
 
 ## Constants (AUTHORITATIVE)

@@ -1,3 +1,5 @@
+> *Unofficial — independent open-source project, not affiliated with the LEGO Group or the Massachusetts Institute of Technology. See [NOTICE](../NOTICE) for trademark and licensing details.*
+
 # Compilation and Debugging Guide
 
 This guide provides instructions for compiling the LEGO SPIKE Prime App Inventor extension on a Windows machine and debugging it on an Android device.

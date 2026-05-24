@@ -1,3 +1,5 @@
+> *Unofficial — independent open-source project, not affiliated with the LEGO Group or the Massachusetts Institute of Technology. See [NOTICE](../NOTICE) for trademark and licensing details.*
+
 # CRITICAL: How Motor/LED Control Actually Works on SPIKE Prime 3.x
 ## Source: SteffenLEGO (LEGO Official Developer) - GitHub Issue #3
 ## Date: 2026-04-25
