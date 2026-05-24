@@ -37,6 +37,8 @@ public class LegoSpikeMovement extends AndroidNonvisibleComponent {
     private String rightPort     = "B";
     private String direction     = "Forward";
     private int    movementSpeed = 50;
+    private long   lastMoveSentMs = 0;
+    private static final long MOVE_THROTTLE_MS = 50; // 20Hz cap to prevent BLE flood
 
     public LegoSpikeMovement(ComponentContainer container) {
         super(container.$form());
@@ -142,6 +144,9 @@ public class LegoSpikeMovement extends AndroidNonvisibleComponent {
         "Start moving the drivebase using the configured Direction and speed.")
     public void StartMoving() {
         if (!checkConnected()) return;
+        long now = System.currentTimeMillis();
+        if (now - lastMoveSentMs < MOVE_THROTTLE_MS) return;
+        lastMoveSentMs = now;
         String cmd = direction.equalsIgnoreCase("forward")
             ? String.format("MOV:FWD:%s:%s:%03d", leftPort, rightPort, movementSpeed)
             : String.format("MOV:BWD:%s:%s:%03d", leftPort, rightPort, movementSpeed);
@@ -152,6 +157,9 @@ public class LegoSpikeMovement extends AndroidNonvisibleComponent {
         "Start moving with steering (–100 to +100, 0 = straight).")
     public void StartMovingWithSteering(int steering) {
         if (!checkConnected()) return;
+        long now = System.currentTimeMillis();
+        if (now - lastMoveSentMs < MOVE_THROTTLE_MS) return;
+        lastMoveSentMs = now;
         steering = Math.max(-100, Math.min(100, steering));
         int speed = direction.equalsIgnoreCase("backward") ? -movementSpeed : movementSpeed;
         connectivity.sendCommand(

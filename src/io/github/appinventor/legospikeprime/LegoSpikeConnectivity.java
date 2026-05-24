@@ -102,8 +102,10 @@ public class LegoSpikeConnectivity extends AndroidNonvisibleComponent {
         "          'ARROW_N':16,'ARROWNORTH':16,'ARROW_E':18,'ARROWEAST':18,\n" +
         "          'ARROW_S':20,'ARROWSOUTH':20,'ARROW_W':22,'ARROWWEST':22}\n" +
         "_timer_start = time.ticks_ms()\n" +
+        "_mov_lp = None\n" +
+        "_mov_rp = None\n" +
         "def on_message(data):\n" +
-        "    global _timer_start\n" +
+        "    global _timer_start, _mov_lp, _mov_rp\n" +
         "    if not isinstance(data, str):\n" +
         "        data = ''.join(chr(b) for b in data)\n" +
         "    parts = data.split(':')\n" +
@@ -125,22 +127,31 @@ public class LegoSpikeConnectivity extends AndroidNonvisibleComponent {
         "            if sub == 'FWD' and len(parts) >= 5:\n" +
         "                lp,rp = parts[2].upper(),parts[3].upper()\n" +
         "                if lp in PORTS and rp in PORTS:\n" +
-        "                    motor_pair.pair(motor_pair.PAIR_1,PORTS[lp],PORTS[rp])\n" +
+        "                    if lp!=_mov_lp or rp!=_mov_rp:\n" +
+        "                        motor_pair.pair(motor_pair.PAIR_1,PORTS[lp],PORTS[rp])\n" +
+        "                        _mov_lp,_mov_rp=lp,rp\n" +
         "                    motor_pair.move(motor_pair.PAIR_1,0,velocity=int(parts[4])*11)\n" +
         "            elif sub == 'BWD' and len(parts) >= 5:\n" +
         "                lp,rp = parts[2].upper(),parts[3].upper()\n" +
         "                if lp in PORTS and rp in PORTS:\n" +
-        "                    motor_pair.pair(motor_pair.PAIR_1,PORTS[lp],PORTS[rp])\n" +
+        "                    if lp!=_mov_lp or rp!=_mov_rp:\n" +
+        "                        motor_pair.pair(motor_pair.PAIR_1,PORTS[lp],PORTS[rp])\n" +
+        "                        _mov_lp,_mov_rp=lp,rp\n" +
         "                    motor_pair.move(motor_pair.PAIR_1,0,velocity=-(int(parts[4])*11))\n" +
         "            elif sub == 'STEER' and len(parts) >= 6:\n" +
         "                lp,rp = parts[2].upper(),parts[3].upper()\n" +
         "                if lp in PORTS and rp in PORTS:\n" +
-        "                    motor_pair.pair(motor_pair.PAIR_1,PORTS[lp],PORTS[rp])\n" +
+        "                    if lp!=_mov_lp or rp!=_mov_rp:\n" +
+        "                        motor_pair.pair(motor_pair.PAIR_1,PORTS[lp],PORTS[rp])\n" +
+        "                        _mov_lp,_mov_rp=lp,rp\n" +
         "                    motor_pair.move(motor_pair.PAIR_1,int(parts[4]),velocity=int(parts[5])*11)\n" +
         "            elif sub == 'STOP':\n" +
         "                if len(parts)>=4:\n" +
         "                    lp,rp=parts[2].upper(),parts[3].upper()\n" +
-        "                    if lp in PORTS and rp in PORTS: motor_pair.pair(motor_pair.PAIR_1,PORTS[lp],PORTS[rp])\n" +
+        "                    if lp in PORTS and rp in PORTS:\n" +
+        "                        if lp!=_mov_lp or rp!=_mov_rp:\n" +
+        "                            motor_pair.pair(motor_pair.PAIR_1,PORTS[lp],PORTS[rp])\n" +
+        "                            _mov_lp,_mov_rp=lp,rp\n" +
         "                motor_pair.stop(motor_pair.PAIR_1)\n" +
         "        elif cmd == 'LGT' and len(parts) >= 2:\n" +
         "            sub = parts[1].upper()\n" +

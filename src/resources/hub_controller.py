@@ -5,11 +5,10 @@
 #   MTR:A:CW:050       start motor A clockwise at 50%
 #   MTR:A:STOP         stop motor A
 #
-#   MOV:PAIR:A:B       set movement pair A=left B=right
-#   MOV:FWD:050        move forward at 50%
-#   MOV:BWD:050        move backward at 50%
-#   MOV:STEER:+50:075  steer +50 (right) at speed 75%
-#   MOV:STOP           stop movement
+#   MOV:FWD:A:B:050       move forward, left=A right=B at 50%
+#   MOV:BWD:A:B:050       move backward
+#   MOV:STEER:A:B:+50:075 steer +50 (right) at speed 75%
+#   MOV:STOP:A:B          stop movement
 #
 #   LGT:ON:HAPPY       show image on 5x5 matrix
 #   LGT:OFF            turn off matrix
@@ -82,10 +81,12 @@ IMAGES = {
 }
 
 _timer_start = time.ticks_ms()
+_mov_lp = None  # cached paired ports — pair() skipped when these match
+_mov_rp = None
 
 
 def on_message(data):
-    global _timer_start
+    global _timer_start, _mov_lp, _mov_rp
     if not isinstance(data, str):
         data = ''.join(chr(b) for b in data)
 
@@ -109,30 +110,39 @@ def on_message(data):
                     motor.run(PORTS[p], spd)
 
         # --- Movement ---
-        # Ports are embedded in every command (MOV:FWD:A:B:050) so mid-program
-        # port changes take effect immediately — same pattern as Motors.
+        # motor_pair.pair() is called once when ports are first used or change.
+        # Subsequent commands with the same ports skip pairing so motor_pair.move()
+        # can update speed immediately without interrupting running motors.
         elif cmd == 'MOV' and len(parts) >= 2:
             sub = parts[1].upper()
             if sub == 'FWD' and len(parts) >= 5:
                 lp, rp = parts[2].upper(), parts[3].upper()
                 if lp in PORTS and rp in PORTS:
-                    motor_pair.pair(motor_pair.PAIR_1, PORTS[lp], PORTS[rp])
+                    if lp != _mov_lp or rp != _mov_rp:
+                        motor_pair.pair(motor_pair.PAIR_1, PORTS[lp], PORTS[rp])
+                        _mov_lp, _mov_rp = lp, rp
                     motor_pair.move(motor_pair.PAIR_1, 0, velocity=int(parts[4]) * 11)
             elif sub == 'BWD' and len(parts) >= 5:
                 lp, rp = parts[2].upper(), parts[3].upper()
                 if lp in PORTS and rp in PORTS:
-                    motor_pair.pair(motor_pair.PAIR_1, PORTS[lp], PORTS[rp])
+                    if lp != _mov_lp or rp != _mov_rp:
+                        motor_pair.pair(motor_pair.PAIR_1, PORTS[lp], PORTS[rp])
+                        _mov_lp, _mov_rp = lp, rp
                     motor_pair.move(motor_pair.PAIR_1, 0, velocity=-(int(parts[4]) * 11))
             elif sub == 'STEER' and len(parts) >= 6:
                 lp, rp = parts[2].upper(), parts[3].upper()
                 if lp in PORTS and rp in PORTS:
-                    motor_pair.pair(motor_pair.PAIR_1, PORTS[lp], PORTS[rp])
+                    if lp != _mov_lp or rp != _mov_rp:
+                        motor_pair.pair(motor_pair.PAIR_1, PORTS[lp], PORTS[rp])
+                        _mov_lp, _mov_rp = lp, rp
                     motor_pair.move(motor_pair.PAIR_1, int(parts[4]), velocity=int(parts[5]) * 11)
             elif sub == 'STOP':
                 if len(parts) >= 4:
                     lp, rp = parts[2].upper(), parts[3].upper()
                     if lp in PORTS and rp in PORTS:
-                        motor_pair.pair(motor_pair.PAIR_1, PORTS[lp], PORTS[rp])
+                        if lp != _mov_lp or rp != _mov_rp:
+                            motor_pair.pair(motor_pair.PAIR_1, PORTS[lp], PORTS[rp])
+                            _mov_lp, _mov_rp = lp, rp
                 motor_pair.stop(motor_pair.PAIR_1)
 
         # --- Light ---
