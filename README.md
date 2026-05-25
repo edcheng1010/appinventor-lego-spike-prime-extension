@@ -79,9 +79,9 @@ This extension is in active development (MVP phase). Current state:
 - [x] COBS encoding/decoding
 - [x] Program upload protocol (ClearSlot → StartFileUpload → TransferChunk → ProgramFlow)
 - [x] TunnelMessage send/receive
-- [ ] Full motor control API (in progress)
-- [ ] Sensor streaming (in progress)
-- [ ] LED matrix patterns (in progress)
+- [x] Full motor control API (phase 2 complete)
+- [x] Sensor streaming (phase 2 complete)
+- [x] LED matrix patterns (phase 2 complete)
 - [ ] Multi-hub simultaneous control (planned)
 
 ## Building from Source
