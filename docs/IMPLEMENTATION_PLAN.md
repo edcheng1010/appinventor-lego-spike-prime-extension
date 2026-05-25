@@ -3,7 +3,7 @@
 > **Unofficial integration.** Independent open-source project, not affiliated with the LEGO Group or the Massachusetts Institute of Technology. See [NOTICE](../NOTICE) for trademark and licensing details.
 
 **Last revised:** 2026-05-26
-**Targeting:** SSP v0.7
+**Targeting:** SSP v0.8
 **Status:** Phase 1 and Phase 2 complete · Phase 3 next
 **Author:** Edward Cheng
 
@@ -40,7 +40,7 @@ Five phases, executed in order. Nothing from the prior plans has been dropped �
 
 ## SSP version targeting
 
-This plan targets **SSP v0.7** as the spec stands today. v0.7 absorbed every blocker we'd surfaced from the SPIKE Prime bridge perspective:
+This plan targets **SSP v0.8** as the spec stands today. v0.8 absorbed every remaining edge case from the SPIKE Prime bridge perspective:
 
 | Wishlist | Status | Notes |
 |---|---|---|
@@ -50,9 +50,10 @@ This plan targets **SSP v0.7** as the spec stands today. v0.7 absorbed every blo
 | v0.5 | ✅ Integrated | Button format formalised, `array` + `string` constraints, gesture constraint enum, implicit-coordinate-constraints from port dimensions |
 | v0.6 | ✅ Integrated | RFCOMM transport, binary encoding finalised, batch commands, motor duration / stop_action, sound.set_volume, led.matrix.brightness / .orientation |
 | v0.7 | ✅ Integrated | `face_orientation` + `angular_velocity` features, new `orientation.*` command category (set_yaw/reset_yaw/set_reference), `touch` on display, sensor-attached LED displays, `tank_drive` (left_speed/right_speed) on movement, `sound.read` getter, `motor.run mode:"power"` |
-| v0.8+ | 📝 Future | DFU, stream multiplexing, auth — not needed for SPIKE Prime bridge |
+| v0.8 | ✅ Integrated | `motor.set_acceleration` + `movement.set_acceleration`, `sound.play wait:true` + `sound_complete` event, MIDI canonical schema (notes/chords/instruments/drums), `motor.goto mode:"relative"`, `motor.run` indefinite-duration clarification |
+| v0.9+ | 📝 Future | DFU, stream multiplexing, auth — not needed for SPIKE Prime bridge |
 
-**No outstanding wishlist dependencies for Phases 3–5.** The Phase 3 expansion can ship fully v0.7-compliant with zero `x_` extensions. **Phase 2 currently ships v0.6**; Phase 3 will bump the bridge to v0.7 as part of the new-feature work.
+**No outstanding wishlist dependencies for Phases 3–5.** The Phase 3 expansion can ship fully v0.8-compliant with zero `x_` extensions. **Phase 2 currently ships v0.6**; Phase 3 will bump the bridge to v0.8 as part of the new-feature work.
 
 ---
 
@@ -217,38 +218,42 @@ Phase 2 must re-run every test from the original CLAUDE.md Phase 3 plus new SSP-
 - All blocks in §3.1–§3.7 below available in App Inventor palette
 - 7-component architecture (5 existing + Sound + System; possibly 8 with Music)
 - Light matrix animation perf benchmark passes (see §3.3)
-- Hub-side Python `hub_controller.py` bumped to declare `"ssp_version": "0.7"` and includes all new v0.7 features (`face_orientation`, `angular_velocity`, `power`, `touch`, `tank_drive`)
+- Hub-side Python `hub_controller.py` bumped to declare `"ssp_version": "0.8"` and includes all v0.7+v0.8 features (`face_orientation`, `angular_velocity`, `power`, `touch`, `tank_drive`, `acceleration`, `goto_modes`, `sound_wait_supported`)
 - New `orientation.*` command category handlers (`set_yaw`, `reset_yaw`, `set_reference`) on the hub
+- `motor.set_acceleration` / `movement.set_acceleration` handlers
+- `sound.play wait:true` with `sound_complete` event emission
+- `motor.goto mode:"absolute"|"relative"` dispatching
+- `motor.run` with omitted `duration` runs indefinitely (per v0.8 §6.1 clarification)
 - `architecture_multicomponent.md` and `mvp_status_and_postmvp.md` memory files updated
 
 ### 3.1 `LegoSpikeMotors` expansion
 
-Every block from the post-MVP roadmap, mapped to v0.7 commands:
+Every block from the post-MVP roadmap, mapped to v0.8 commands:
 
-| Block | SSP v0.7 mapping |
+| Block | SSP v0.8 mapping |
 |---|---|
 | `RunMotorForDuration(direction, amount, unit)` | `motor.run` with `duration` + `duration_unit` ("ms"/"degrees"/"rotations") — bridge-side timing |
-| `MotorGoToPosition(position, direction)` | `motor.goto` with `position` + `direction` |
+| `MotorGoToPosition(position, direction)` | `motor.goto` with `position` + `direction`, `mode:"absolute"` (v0.8 default) |
 | `GetMotorPosition()` → `MotorPositionRead` event | `sensor.subscribe` on motor port (`position` feature) |
 | `GetMotorSpeed()` → `MotorSpeedRead` event | `sensor.subscribe` on motor port (`speed` feature) |
-| `GoToRelativeMotorPosition(degrees)` | `motor.run` with `duration:degrees`, `duration_unit:"degrees"` (combines run + relative position semantics) |
+| `GoToRelativeMotorPosition(degrees)` | `motor.goto` with `position:<degrees>`, `mode:"relative"` *(v0.8 §6.1)* — bridge declares `"relative"` in `goto_modes` array |
 | `ResetRelativeMotorPosition()` | `motor.reset` |
 | `RelativeMotorPosition()` | `sensor.read` on motor port (`position` feature) |
 | `StartMotorWithPower(power)` | `motor.run` with `speed` value and `mode:"power"` *(v0.7 §6.1)* — bridge declares `power` feature on motor port |
 | `MotorPower()` | `sensor.read` on motor port (`load` feature) |
 | `StopAndCoastMotor(port)` | `motor.stop` with `stop_action:"coast"` |
-| `SetMotorAcceleration(rate)` | Still open — no canonical home even in v0.7. Use `x_acceleration` extension, file v0.8 wishlist if classroom demand emerges |
+| `SetMotorAcceleration(rate)` | `motor.set_acceleration` with `rate:<ms>` *(v0.8 §6.1)* — bridge declares `acceleration` feature on motor port. Rate is milliseconds to ramp from 0–100% speed |
 
 ### 3.2 `LegoSpikeMovement` expansion
 
-| Block | SSP v0.7 mapping |
+| Block | SSP v0.8 mapping |
 |---|---|
 | `MoveForDuration(direction, amount, unit)` | `movement.drive` with `duration` + `duration_unit` |
 | `MoveWithSteeringForDuration(steering, amount, unit)` | `movement.drive` with `steering` + `duration` |
 | `StartMovingAtSpeed(leftSpeed, rightSpeed)` | `movement.drive` with `left_speed` + `right_speed` *(v0.7 §6.1 tank drive)* — bridge declares `tank_drive` capability flag |
 | `SetMotorRotationDistance(distance)` | Client-side config affecting subsequent `movement.drive` `duration` math when `duration_unit:"rotations"` |
 | `SetMovementBrakeAtStop(mode)` | Client-side config sticking the `stop_action` parameter onto subsequent `movement.stop` calls |
-| `SetMovementAcceleration(rate)` | Still open — same as motor acceleration; file v0.8 wishlist if needed |
+| `SetMovementAcceleration(rate)` | `movement.set_acceleration` with `rate:<ms>` *(v0.8 §6.1)* — applies to the configured motor pair |
 
 ### 3.3 `LegoSpikeLight` expansion (display port)
 
@@ -302,32 +307,36 @@ Every block from the post-MVP roadmap, mapped to v0.7 commands:
 
 Phase-2 bridge declared `speaker` with only `beep`. Phase 3 adds full speaker support after FW capability verification.
 
-| Block | SSP v0.7 mapping |
+| Block | SSP v0.8 mapping |
 |---|---|
 | `Beep(freq, duration)` | `sound.beep` |
 | `PlayBeepForSeconds(pitch, seconds)` | `sound.beep` with `duration` |
-| `StartPlayingBeep(freq)` | `sound.beep` with no duration (verify spec — may need `duration:0` or `duration:Infinity` convention) |
+| `StartPlayingBeep(freq)` | `sound.beep` with no duration — runs indefinitely per v0.8 §6.1 omitted-duration clarification |
 | `StopAllSounds()` | `sound.stop` |
 | `SetVolume(level)` | `sound.set_volume` — bridge adds `volume` feature on speaker port |
 | `GetVolume()` | `sound.read metric:"volume"` *(v0.7 §6.3)* — returns current volume level |
-| `PlayBuiltin(name)` / `StartSound(name)` | `sound.play` with `sound` field; dropdown populated from `builtin_sounds` capability array |
-| `PlaySoundUntilDone(name)` | Send `sound.play`, block on completion event from bridge (verify bridge emits `{"event":"sound_complete"}` or similar) |
+| `PlayBuiltin(name)` / `StartSound(name)` | `sound.play` with `sound` field, `wait:false` (default non-blocking) *(v0.8 §6.3)* — dropdown populated from `builtin_sounds` capability array |
+| `PlaySoundUntilDone(name)` | `sound.play` with `sound` field and `wait:true` *(v0.8 §6.3)* — client waits for `{"event":"sound_complete"}` correlated by `request_id`. Bridge declares `"sound_wait_supported": true` in capability |
 
 **Open question:** SPIKE FW 3.x `hub.sound` API surface — needs verification of which built-in sounds exist and whether `play_sound` supports a wait-for-completion mode.
 
-### 3.6 `LegoSpikeMusic` *(new component, conditional)*
+### 3.6 `LegoSpikeMusic` *(new component, conditional on `midi` feature)*
 
-Component exists ONLY if SPIKE FW 3.x supports MIDI-style note playback. If not, music blocks fall back to looped `sound.beep` with frequency-from-note-name conversion client-side.
+Component ships if and only if the bridge declares `"midi"` in its `speaker` features. SPIKE Prime's `hub.sound` API on FW 3.x must be verified — if it supports `notes:` strings, full Music component ships; otherwise the component is omitted and users compose via `LegoSpikeSound.Beep()` directly.
 
-| Block | SSP v0.7 mapping |
+v0.8 §6.3.1 defines the canonical note string format: `<note>[<accidental>]<octave>:<duration>` (e.g. `"C4:200 E4:200 G4:400"`), rests as `R:<duration>`, chords as `[C4 E4 G4]:<duration>`.
+
+| Block | SSP v0.8 mapping |
 |---|---|
-| `PlayNote(note, duration)` | If MIDI supported: `sound.play` with `notes:` field; else client-side beep |
-| `PlayDrum(name)` | `sound.play` with built-in percussion sound names |
-| `Rest(duration)` | Client-side delay |
-| `SetInstrument(name)` | Client-side state affecting subsequent `PlayNote` rendering (if MIDI: include in `notes:` payload; else affects beep waveform — likely no-op for SPIKE) |
+| `PlayNote(note, duration)` | `sound.play` with `notes:` field containing single note string per v0.8 §6.3.1 format |
+| `PlayChord(notes, duration)` | `sound.play` with `notes:` field using `[N1 N2 N3]:duration` chord syntax |
+| `PlayDrum(name)` | `sound.play` with drum name from capability `drums` enum *(v0.8 standard names: kick/snare/hi_hat_closed/hi_hat_open/crash/ride/tom_low/tom_mid/tom_high/clap/cowbell)* |
+| `Rest(duration)` | `sound.play` with `notes:"R:<duration>"` (single rest token) |
+| `SetInstrument(name)` | Client-side state; included as `instrument:` field in subsequent `sound.play notes` calls. Dropdown populated from capability `instruments` enum |
 | `SetTempo(bpm)` / `ChangeTempo(delta)` / `GetTempo()` | Client-side state, applied as `tempo:` field in `sound.play` |
+| `PlayMusicalPhrase(notes)` | Direct passthrough of v0.8 `notes:` string format — advanced users compose with full syntax |
 
-**Open question:** if SPIKE doesn't natively support MIDI, decide whether to ship `LegoSpikeMusic` at all. Falling back to beep-based music gives poor results — may be better to omit and let users compose via individual `Beep` calls.
+**FW verification still required:** does SPIKE FW 3.x `hub.sound.play()` accept the v0.8 `notes:` string format directly, or does the hub-side Python need to parse and synthesise notes via individual frequency beeps? If the latter, Music ships but with degraded quality (no envelope/instrument fidelity).
 
 ### 3.7 `LegoSpikeSystem` *(new component)*
 
@@ -364,9 +373,9 @@ After Phase 3 lands:
 - **Update `README.md`** Components table (currently lists 5)
 - **Update `docs/SSP_BRIDGE_GUIDE.md`** with the full v0.6 mapping table
 
-### 3.10 v0.7 wishlist — STATUS: ✅ INTEGRATED (solaria-hub #8 → spec v0.7)
+### 3.10 v0.7 + v0.8 wishlists — STATUS: ✅ ALL INTEGRATED
 
-The Phase 3 v0.7 wishlist (filed as solaria-hub issue #8) was fully integrated into [SSP v0.7](https://github.com/edcheng1010/solaria-hub/blob/main/spec/SSP-v0.7.md):
+**v0.7 wishlist** (solaria-hub #8 → [SSP v0.7](https://github.com/edcheng1010/solaria-hub/blob/main/spec/SSP-v0.7.md)):
 
 | Wishlist item | v0.7 resolution |
 |---|---|
@@ -380,33 +389,51 @@ The Phase 3 v0.7 wishlist (filed as solaria-hub issue #8) was fully integrated i
 | `sound.read` for volume getter | ✅ §6.3 |
 | `motor.run mode:"power"` | ✅ §6.1 + `power` feature in §5.1 |
 
-**Still open after v0.7** (file as v0.8 wishlist only if classroom usage demands):
-- `motor.set_acceleration` / `movement.set_acceleration` — not canonical; ship as `x_acceleration` extension if needed
-- `sound.play_until_done` semantics — does `sound.play` block or return immediately? Spec should clarify
-- Music/MIDI semantics — drum-kit specification, notes string parsing convention
+**v0.8 wishlist** (solaria-hub #9 → [SSP v0.8](https://github.com/edcheng1010/solaria-hub/blob/main/spec/SSP-v0.8.md)):
 
-### 3.11 Hub-side Python (`hub_controller.py`) — v0.7 bump tasks
+| Wishlist item | v0.8 resolution |
+|---|---|
+| `motor.set_acceleration` + `movement.set_acceleration` | ✅ §6.1 + `acceleration` feature in §5.1 |
+| `sound.play wait:true` + `sound_complete` event | ✅ §6.3 + `sound_wait_supported` capability flag |
+| MIDI canonical schema (notes/chords/instruments/drums) | ✅ §6.3.1 with `<note>[<accidental>]<octave>:<duration>` format |
+| `motor.goto mode:"relative"` | ✅ §6.1 + `goto_modes` array in capability |
+| `motor.run` indefinite-duration clarification | ✅ §6.1 (omitting `duration` = indefinite; `duration:0` = stop) |
 
-Bumping the bridge from v0.6 to v0.7 is part of Phase 3:
+**Nothing still open** for the SPIKE Prime bridge after v0.8. Phase 3 can ship 100% canonical with zero `x_` extensions.
 
-- **3.11.1** Update capability declaration:
-  - `ssp_version: "0.7"`
-  - Motor ports: add `power` to features
+### 3.11 Hub-side Python (`hub_controller.py`) — v0.6 → v0.8 bump tasks
+
+Bumping the bridge from v0.6 to v0.8 is part of Phase 3:
+
+**Capability declaration:**
+- **3.11.1** Update declaration shape:
+  - `ssp_version: "0.8"`
+  - Motor ports: add `power`, `acceleration`, `goto_modes` to features; declare `goto_modes: ["absolute", "relative"]`
   - `imu` port: add `face_orientation` (with enum constraint) and `angular_velocity` to features
   - `display` port: add `touch` to features (verify SPIKE FW exposes it)
-  - `movement`: add `tank_drive: true` top-level capability flag (or wherever v0.7 places it)
+  - `movement`: add `tank_drive: true` top-level capability flag
+  - `speaker` port: add `sound_wait_supported: true`; declare `instruments` and `drums` enums if MIDI is supported by SPIKE FW
   - Distance-sensor display port: enumerate when distance sensor present (`width:2, height:2, depth:grayscale`)
   - 3×3 Color Matrix display port: enumerate when accessory present (`width:3, height:3, depth:rgb`)
-- **3.11.2** Add command handlers for new `orientation.*` category:
-  - `orientation.set_yaw` with `angle` param
-  - `orientation.reset_yaw`
-  - `orientation.set_reference` with `face` param
-- **3.11.3** Add `mode` handling to `motor.run`: `"speed"` (default) vs `"power"` (raw duty cycle, scaled differently)
-- **3.11.4** Add `left_speed`/`right_speed` branch to `movement.drive` (tank drive)
-- **3.11.5** Add `sound.read` handler returning cached volume
-- **3.11.6** Add `face_orientation` and `angular_velocity` to the sensor.read dispatcher for the `imu` port
-- **3.11.7** Add `touch` event emitter for the light matrix (only if FW 3.x exposes tap events)
-- **3.11.8** Add `led.matrix.pixel` routing for sensor-attached display ports — dispatch to `distance_sensor.light_up()` or the color-matrix-accessory API depending on port id
+
+**New v0.7 commands:**
+- **3.11.2** `orientation.set_yaw` with `angle` param
+- **3.11.3** `orientation.reset_yaw`
+- **3.11.4** `orientation.set_reference` with `face` param
+- **3.11.5** `motor.run mode:"power"` (raw duty cycle, scaled differently from speed mode)
+- **3.11.6** `movement.drive left_speed`/`right_speed` branch (tank drive)
+- **3.11.7** `sound.read` handler returning cached volume
+- **3.11.8** `sensor.read`/`sensor.subscribe` dispatch for `face_orientation` and `angular_velocity` on `imu` port
+- **3.11.9** `touch` event emitter for the light matrix (only if FW 3.x exposes tap events)
+- **3.11.10** `led.matrix.pixel` routing for sensor-attached display ports — dispatch to `distance_sensor.light_up()` or the color-matrix-accessory API depending on port id
+
+**New v0.8 commands:**
+- **3.11.11** `motor.set_acceleration` with `rate` param (ms to ramp 0→100% speed)
+- **3.11.12** `movement.set_acceleration` with `rate` param
+- **3.11.13** `motor.goto mode:"relative"` — advance by N degrees from current position (vs absolute default)
+- **3.11.14** `sound.play wait:true` semantics — emit `{"event":"sound_complete","request_id":<id>}` when playback finishes
+- **3.11.15** `sound.play` with `notes:` field — parse v0.8 §6.3.1 format (single notes, rests, chords, instrument switching). Verify SPIKE FW supports MIDI playback natively; if not, fall back to frequency-from-note-name beep synthesis
+- **3.11.16** Explicit `motor.run` indefinite-duration handling — omitting `duration` runs forever; `duration:0` or negative immediately stops
 
 ---
 
@@ -606,7 +633,8 @@ The broader strategic direction for the Solaria platform is documented in [VISIO
 | v0.5 | #4 | ✅ Integrated | Button format, array constraint type, gesture constraints, display dimension implicit constraints, plus `string` constraint type as bonus |
 | v0.6 | #5 | ✅ Integrated | RFCOMM transport, binary encoding finalised, batch commands, motor duration/stop_action, sound.set_volume, led.matrix.brightness/orientation |
 | v0.7 | #8 | ✅ Integrated | `face_orientation`, `angular_velocity`, `orientation.*` command category, display `touch`, sensor-attached LED displays, tank drive, `sound.read`, motor power mode |
-| v0.8+ | TBD | 📝 Future | `motor.set_acceleration`, sound completion semantics, MIDI/drum-kit specification — file only if classroom demand emerges |
+| v0.8 | #9 | ✅ Integrated | `motor.set_acceleration` + `movement.set_acceleration`, `sound.play wait:true` + `sound_complete` event, MIDI canonical schema (§6.3.1), `motor.goto mode:"relative"`, indefinite-`duration` clarification |
+| v0.9+ | TBD | 📝 Future | DFU, stream multiplexing, auth — not needed for SPIKE Prime bridge |
 
 ---
 
@@ -637,7 +665,7 @@ For traceability — every item from prior planning documents is accounted for i
 
 ### From mvp_status_and_postmvp.md (post-MVP block list)
 
-Every block listed in that memory is mapped to a Phase-3 section in §3.1–§3.7 above. The original memory groups blocks by component; this plan groups them the same way and adds the v0.6 SSP mapping for each.
+Every block listed in that memory is mapped to a Phase-3 section in §3.1–§3.7 above. The original memory groups blocks by component; this plan groups them the same way and adds the v0.8 SSP mapping for each.
 
 ### From the PR 1 + PR 2 plans drafted in this session
 
@@ -652,14 +680,16 @@ Every block listed in that memory is mapped to a Phase-3 section in §3.1–§3.
 
 These remain unresolved and should be answered before / during the relevant phase:
 
-1. **SPIKE Prime FW 3.x sound API surface** — Which built-in sounds exist? Does `play_sound` block until complete or return immediately? (affects §3.5 `builtin_sounds` and `PlaySoundUntilDone`)
-2. **SPIKE Prime FW 3.x MIDI support** — Does `hub.sound` accept note sequences or just frequency beeps? (affects §3.6 `LegoSpikeMusic` viability)
+1. **SPIKE Prime FW 3.x sound API surface** — Which built-in sounds exist on the hub? Spec semantics are now clear (v0.8 §6.3 `wait:true` + `sound_complete`); what remains is verifying which named sounds the hub firmware actually has so they can be enumerated in capability `builtin_sounds`. (affects §3.5)
+2. **SPIKE Prime FW 3.x MIDI support** — Does `hub.sound` accept note sequences directly, or must the hub-side Python parse the v0.8 §6.3.1 `notes:` string into individual frequency beeps? Affects whether `LegoSpikeMusic` ships with full instrument fidelity or beep-fallback quality. (affects §3.6)
 3. **Minimum reliable subscription interval over SPIKE BLE** — Memory says ~50 ms; needs benchmark with actual sensor load (affects §2.1 constraint declaration)
-4. **`motor.run` indefinite-duration encoding** — Spec says `duration` is optional; does omitting it mean "indefinite"? Or should there be `duration: 0` / `duration: -1` convention? (affects §2.1.2 and §3.5)
-5. **`motor.goto` relative vs absolute** — v0.6 has `position` constraint with `wraps:true` suggesting absolute. SPIKE has both relative and absolute Python APIs. Does v0.6 cover relative? Or need `x_relative_goto`? (affects §3.1 `GoToRelativeMotorPosition`)
+4. ~~**`motor.run` indefinite-duration encoding**~~ — RESOLVED in v0.8 §6.1 (omitting `duration` = indefinite; `duration:0` or negative = immediate stop)
+5. ~~**`motor.goto` relative vs absolute**~~ — RESOLVED in v0.8 §6.1 (`mode:"absolute"|"relative"` + `goto_modes` capability array)
 6. ~~**`movement.drive` left/right speeds**~~ — RESOLVED in v0.7 §6.1 (`left_speed` / `right_speed` parameters)
 7. **SPIKE Prime 5×5 matrix max simultaneous-update rate** — for §3.3 light matrix animation benchmark
 8. **`@Options` enum vs capability-driven dropdowns** — Phase 4 may need real designer-side investigation of App Inventor extension UI capabilities
+9. **SPIKE FW 3.x light matrix touch detection** — does the hardware/firmware expose tap events on the 5×5 grid? Affects whether `touch` feature can be declared on the `display` port (§3.3 `WhenLightMatrixTapped`)
+10. **SPIKE FW 3.x motor acceleration ramping** — does `motor.run` already support hardware-level acceleration ramps, or does our Python need to implement client-side stepped velocity? Affects §3.1 `SetMotorAcceleration` fidelity
 
 ---
 
