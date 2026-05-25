@@ -532,6 +532,14 @@ Per-hub `SubscriptionManager` instances must aggregate sensor events from all hu
 - Multi-hub stress (Phase 2+): 4+ hubs on the same Android device, simultaneous connection-stability test (validates RSSI staleness logic from CLAUDE.md Rule 2 still works under SSP)
 - Reconnection-after-disconnect: explicit test that capability re-declaration works on re-connect
 
+### Solaria ecosystem context
+
+The broader strategic direction for the Solaria platform is documented in [VISION.md](https://github.com/edcheng1010/solaria-hub/blob/main/VISION.md) in the solaria-hub repository. Key points that inform the later phases of this plan:
+
+- **Layer 3 (AI/Agent)** — the long-term goal is an agentic overlay across all clients and hardware, generating SSP commands from natural language ("vibe coding") and providing GUI-based electronics configuration. This is where Phase 5+ work eventually lands.
+- **Open-core + hosted SaaS** — the platform is free/open for personal use (BYOK LLM key); a hosted paid tier for schools covers fleet management and curriculum integration.
+- **Augmentation, not competition** — Solaria sits on top of existing tools (App Inventor, Scratch, Arduino IDE, MakeCode) rather than replacing them. This extension embodies that principle.
+
 ### SSP spec contributions tracker
 
 | Wishlist | Issue | Status | Items integrated |

@@ -72,7 +72,7 @@ This is different from older LEGO hubs (Boost, SPIKE Essential) which accept dir
 
 ## Project Status
 
-This extension is in active development (MVP phase). Current state:
+This extension implements [SSP v0.6](https://github.com/edcheng1010/solaria-hub/blob/main/spec/SSP-v0.6.md) — the Solaria Standard Protocol — for full bidirectional communication with the hub. Active development continues toward Phase 3 (expanded block surface) and Phase 5 (classroom multi-hub). Current state:
 
 - [x] BLE scanning and connection (stable)
 - [x] Ghost device filtering via RSSI staleness
