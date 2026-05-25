@@ -113,6 +113,79 @@ public class LegoSpikeLight extends AndroidNonvisibleComponent {
     }
 
     // =========================================================================
+    // Phase 3 expansion blocks
+    // =========================================================================
+
+    @SimpleFunction(description =
+        "Show an image on the light matrix for a set number of seconds, then clear it.")
+    public void TurnOnLightMatrixForSeconds(double seconds) {
+        if (!checkConnected()) return;
+        connectivity.sendSSP(new SSPMessage("led.matrix.image")
+            .withPort("display")
+            .withParam("image", image.toUpperCase()));
+        // Client-side delay: schedule clear via handler
+        new android.os.Handler(android.os.Looper.getMainLooper()).postDelayed(() -> {
+            if (connectivity != null && connectivity.IsConnected()) {
+                connectivity.sendSSP(new SSPMessage("led.matrix.clear").withPort("display"));
+            }
+        }, (long)(seconds * 1000));
+    }
+
+    @SimpleFunction(description = "Set the global brightness of the light matrix (0–100).")
+    public void SetLightMatrixBrightness(int level) {
+        if (!checkConnected()) return;
+        connectivity.sendSSP(new SSPMessage("led.matrix.brightness")
+            .withPort("display")
+            .withParam("level", Math.max(0, Math.min(100, level))));
+    }
+
+    @SimpleFunction(description =
+        "Rotate the light matrix display. rotation: 0, 90, 180, or 270 degrees.")
+    public void RotateLightMatrix(int rotation) {
+        if (!checkConnected()) return;
+        connectivity.sendSSP(new SSPMessage("led.matrix.orientation")
+            .withPort("display")
+            .withParam("rotation", rotation));
+    }
+
+    @SimpleFunction(description =
+        "Set the orientation of the light matrix display. rotation: 0, 90, 180, or 270.")
+    public void SetLightMatrixOrientation(int rotation) {
+        RotateLightMatrix(rotation);
+    }
+
+    @SimpleFunction(description =
+        "Set the status (center button) LED color. "
+        + "color: 'red', 'orange', 'yellow', 'green', 'cyan', 'blue', 'violet', 'magenta', 'white', or 'off'.")
+    public void SetStatusLightColor(String color) {
+        if (!checkConnected()) return;
+        if (color == null) color = "off";
+        connectivity.sendSSP(new SSPMessage("led.set")
+            .withPort("status")
+            .withParam("color", color.toLowerCase()));
+    }
+
+    @SimpleFunction(description =
+        "Light up the 4 indicator LEDs on a distance sensor. "
+        + "Each value is brightness 0–100. portId: the sensor port (A–F).")
+    public void LightUpDistanceSensor(String portId, int topLeft, int topRight,
+                                      int bottomLeft, int bottomRight) {
+        if (!checkConnected()) return;
+        // Distance sensor display port: 2x2 grayscale, addressed as (0,0)..(1,1)
+        String dp = portId.toUpperCase() + "_display";
+        int[][] pixels = {{topLeft, topRight}, {bottomLeft, bottomRight}};
+        for (int y = 0; y < 2; y++) {
+            for (int x = 0; x < 2; x++) {
+                connectivity.sendSSP(new SSPMessage("led.matrix.pixel")
+                    .withPort(dp)
+                    .withParam("x", x)
+                    .withParam("y", y)
+                    .withParam("brightness", Math.max(0, Math.min(100, pixels[y][x]))));
+            }
+        }
+    }
+
+    // =========================================================================
     // Helpers
     // =========================================================================
     private boolean checkConnected() {
