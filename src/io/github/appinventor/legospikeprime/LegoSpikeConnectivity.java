@@ -786,6 +786,11 @@ public class LegoSpikeConnectivity extends AndroidNonvisibleComponent {
     private static final String PROGRAM_HASH =
         String.valueOf(HUB_CONTROLLER_PROGRAM.hashCode());
 
+    // In-memory cache: hub address → program hash (session-scoped fallback for
+    // SharedPreferences failures; also makes the first reconnect within a session fast).
+    private static final java.util.concurrent.ConcurrentHashMap<String, String> memCache =
+        new java.util.concurrent.ConcurrentHashMap<>();
+
     // HubDataListener — implemented by sub-components that need hub responses
     // =========================================================================
     interface HubDataListener {
@@ -1769,7 +1774,7 @@ public class LegoSpikeConnectivity extends AndroidNonvisibleComponent {
                     logDebug("UploadController: hash match — probing hub (skip upload)");
                     sendFramedMessage(MessageFramer.pack(
                         MessageBuilder.buildProgramFlowRequest(false, CONTROLLER_SLOT)));
-                    if (waitForCapability(2000)) {
+                    if (waitForCapability(4000)) {
                         logDebug("UploadController: fast path OK");
                         final String dn = connectedDeviceName;
                         mainHandler.post(() -> HubConnected(dn));
@@ -1837,30 +1842,34 @@ public class LegoSpikeConnectivity extends AndroidNonvisibleComponent {
         }, "LegoSpikeUpload").start();
     }
 
-    /** Polls until capability declaration arrives or timeout expires. */
+    /** Blocks the upload thread until capability arrives or timeoutMs elapses. */
     private boolean waitForCapability(long timeoutMs) {
-        long deadline = System.currentTimeMillis() + timeoutMs;
-        while (System.currentTimeMillis() < deadline && isConnected) {
-            if (capabilityStore.getDeviceType() != null) return true;
-            try { Thread.sleep(50); } catch (InterruptedException e) { break; }
-        }
-        return capabilityStore.getDeviceType() != null;
+        return capabilityStore.waitForCapability(timeoutMs);
     }
 
     private String getCachedProgramHash(String address) {
+        // In-memory cache checked first (fastest, works within a session).
+        if (memCache.containsKey(address)) return memCache.get(address);
+        // SharedPreferences for cross-session persistence.
         try {
             android.content.SharedPreferences prefs = form.getApplicationContext()
                 .getSharedPreferences(PREFS_NAME, android.content.Context.MODE_PRIVATE);
             return prefs.getString("phash_" + address, null);
-        } catch (Exception e) { return null; }
+        } catch (Exception e) {
+            logDebug("getCachedProgramHash error: " + e.getMessage());
+            return null;
+        }
     }
 
     private void setCachedProgramHash(String address, String hash) {
+        memCache.put(address, hash);
         try {
             android.content.SharedPreferences prefs = form.getApplicationContext()
                 .getSharedPreferences(PREFS_NAME, android.content.Context.MODE_PRIVATE);
             prefs.edit().putString("phash_" + address, hash).apply();
-        } catch (Exception ignored) {}
+        } catch (Exception e) {
+            logDebug("setCachedProgramHash error: " + e.getMessage());
+        }
     }
 
     private byte[] awaitUploadResponse(long timeoutMs) {

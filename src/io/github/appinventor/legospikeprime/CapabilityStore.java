@@ -42,25 +42,37 @@ public class CapabilityStore {
     private boolean supportsBatch;
     private List<String> systemMetrics = Collections.emptyList();
     private Map<String, PortInfo> ports = new HashMap<>();
-    private boolean loaded = false;
+    private boolean loaded   = false;
+    private boolean received = false; // signals waitForCapability()
 
     // -----------------------------------------------------------------------
-    // Load
+    // Load / clear / wait
     // -----------------------------------------------------------------------
 
-    /**
-     * Parses and caches a capability declaration JSON object received from
-     * the bridge per SSP v0.6 §5.
-     *
-     * @param capability the root capability JSONObject
-     */
     public synchronized void clear() {
         ports.clear();
         deviceType = null;
         sspVersion = null;
         supportsBatch = false;
         systemMetrics = Collections.emptyList();
-        loaded = false;
+        loaded   = false;
+        received = false;
+        notifyAll(); // wake any thread stuck in waitForCapability after a clear
+    }
+
+    /**
+     * Blocks until a capability declaration arrives or timeoutMs elapses.
+     * Must NOT be called on the main/UI thread.
+     */
+    public synchronized boolean waitForCapability(long timeoutMs) {
+        if (received) return true;
+        long deadline = System.currentTimeMillis() + timeoutMs;
+        while (!received) {
+            long remaining = deadline - System.currentTimeMillis();
+            if (remaining <= 0) break;
+            try { wait(remaining); } catch (InterruptedException e) { break; }
+        }
+        return received;
     }
 
     public synchronized void load(JSONObject capability) {
@@ -120,7 +132,9 @@ public class CapabilityStore {
                 ports.put(id, info);
             }
         }
-        loaded = true;
+        loaded   = true;
+        received = true;
+        notifyAll(); // wake waitForCapability()
     }
 
     // -----------------------------------------------------------------------
