@@ -325,13 +325,64 @@ public class LegoSpikeSensors extends AndroidNonvisibleComponent
                 case "pitch":
                 case "roll":
                 case "yaw": {
-                    // axis title-case to match TiltAxis option block
                     final String titleAx = type.substring(0, 1).toUpperCase() + type.substring(1);
                     try {
                         final int degrees = val instanceof Number
                             ? ((Number) val).intValue()
                             : Integer.parseInt(val.toString());
                         mainHandler.post(() -> TiltAngleRead(titleAx, degrees));
+                    } catch (Exception ignored) {}
+                    break;
+                }
+                case "face_orientation": {
+                    final String fo = val != null ? val.toString() : "";
+                    mainHandler.post(() -> {
+                        FaceOrientationRead(fo);
+                        FaceOrientationChanged(fo);
+                    });
+                    break;
+                }
+                case "gesture": {
+                    final String g = val != null ? val.toString() : "";
+                    mainHandler.post(() -> GestureDetected(g));
+                    break;
+                }
+                case "acceleration": {
+                    try {
+                        org.json.JSONObject acc = (org.json.JSONObject) val;
+                        final double ax = acc.optDouble("x", 0);
+                        final double ay = acc.optDouble("y", 0);
+                        final double az = acc.optDouble("z", 0);
+                        mainHandler.post(() -> AccelerationRead(ax, ay, az));
+                    } catch (Exception ignored) {}
+                    break;
+                }
+                case "angular_velocity": {
+                    try {
+                        org.json.JSONObject av = (org.json.JSONObject) val;
+                        final double vx = av.optDouble("x", 0);
+                        final double vy = av.optDouble("y", 0);
+                        final double vz = av.optDouble("z", 0);
+                        mainHandler.post(() -> AngularVelocityRead(vx, vy, vz));
+                    } catch (Exception ignored) {}
+                    break;
+                }
+                case "rgb": {
+                    try {
+                        org.json.JSONArray rgb = (org.json.JSONArray) val;
+                        final int r = rgb.optInt(0, 0);
+                        final int g = rgb.optInt(1, 0);
+                        final int b = rgb.optInt(2, 0);
+                        mainHandler.post(() -> ColorRGBRead(port, r, g, b));
+                    } catch (Exception ignored) {}
+                    break;
+                }
+                case "reflected": {
+                    try {
+                        final int v = val instanceof Number
+                            ? ((Number) val).intValue()
+                            : Integer.parseInt(val.toString());
+                        mainHandler.post(() -> ReflectedLightRead(port, v));
                     } catch (Exception ignored) {}
                     break;
                 }
@@ -342,8 +393,122 @@ public class LegoSpikeSensors extends AndroidNonvisibleComponent
     }
 
     // =========================================================================
-    // Helpers
+    // Phase 3 IMU blocks (§3.4)
     // =========================================================================
+
+    @SimpleFunction(description =
+        "Request hub acceleration on all axes. Fires AccelerationRead when the hub responds.")
+    public void GetHubAcceleration() {
+        sendSensorSSP(new SSPMessage("sensor.read")
+            .withPort("imu").withParam("type", "acceleration"));
+    }
+
+    @SimpleFunction(description =
+        "Request hub angular velocity on all axes. Fires AngularVelocityRead when received.")
+    public void GetHubAngularVelocity() {
+        sendSensorSSP(new SSPMessage("sensor.read")
+            .withPort("imu").withParam("type", "angular_velocity"));
+    }
+
+    @SimpleFunction(description =
+        "Request all three tilt angles at once. Fires OrientationRead when the hub responds.")
+    public void GetHubOrientation() {
+        sendSensorSSP(new SSPMessage("sensor.read")
+            .withPort("imu").withParam("type", "pitch"));
+        sendSensorSSP(new SSPMessage("sensor.read")
+            .withPort("imu").withParam("type", "roll"));
+        sendSensorSSP(new SSPMessage("sensor.read")
+            .withPort("imu").withParam("type", "yaw"));
+    }
+
+    @SimpleFunction(description =
+        "Request which face of the hub is currently up. Fires FaceOrientationRead when received.")
+    public void GetHubFaceOrientation() {
+        sendSensorSSP(new SSPMessage("sensor.read")
+            .withPort("imu").withParam("type", "face_orientation"));
+    }
+
+    @SimpleFunction(description =
+        "Subscribe to gesture events. GestureDetected fires whenever the hub detects a gesture.")
+    public void SubscribeToGestures() {
+        if (!checkConnected()) return;
+        connectivity.sendSSP(new SSPMessage("sensor.subscribe")
+            .withPort("imu")
+            .withParam("type", "gesture")
+            .withParam("mode", "on_change"));
+    }
+
+    @SimpleFunction(description =
+        "Subscribe to face orientation changes. FaceOrientationChanged fires when the hub flips.")
+    public void SubscribeToFaceOrientation() {
+        if (!checkConnected()) return;
+        connectivity.sendSSP(new SSPMessage("sensor.subscribe")
+            .withPort("imu")
+            .withParam("type", "face_orientation")
+            .withParam("mode", "on_change"));
+    }
+
+    @SimpleFunction(description =
+        "Request RGB values from the color sensor. Fires ColorRGBRead when received.")
+    public void GetColorRGB() {
+        sendSensorSSP(new SSPMessage("sensor.read")
+            .withPort(colorSensorPort).withParam("type", "rgb"));
+    }
+
+    @SimpleFunction(description =
+        "Request reflected light intensity (0–100) from the color sensor. "
+        + "Fires ReflectedLightRead when received.")
+    public void GetReflectedLight() {
+        sendSensorSSP(new SSPMessage("sensor.read")
+            .withPort(colorSensorPort).withParam("type", "reflected"));
+    }
+
+    // =========================================================================
+    // Phase 3 new events
+    // =========================================================================
+
+    @SimpleEvent(description = "Fired when GetHubAcceleration responds. Values in m/s².")
+    public void AccelerationRead(double x, double y, double z) {
+        EventDispatcher.dispatchEvent(this, "AccelerationRead", x, y, z);
+    }
+
+    @SimpleEvent(description = "Fired when GetHubAngularVelocity responds. Values in deg/s.")
+    public void AngularVelocityRead(double x, double y, double z) {
+        EventDispatcher.dispatchEvent(this, "AngularVelocityRead", x, y, z);
+    }
+
+    @SimpleEvent(description =
+        "Fired when GetHubFaceOrientation responds. "
+        + "orientation: face_up, face_down, port_a_up, port_a_down, port_e_up, port_e_down.")
+    public void FaceOrientationRead(String orientation) {
+        EventDispatcher.dispatchEvent(this, "FaceOrientationRead", orientation);
+    }
+
+    @SimpleEvent(description =
+        "Fired when the hub detects a gesture (after SubscribeToGestures). "
+        + "gesture: shake, tap, double_tap, fall, face_up, face_down.")
+    public void GestureDetected(String gesture) {
+        EventDispatcher.dispatchEvent(this, "GestureDetected", gesture);
+    }
+
+    @SimpleEvent(description =
+        "Fired when the hub detects a face-orientation change (after SubscribeToFaceOrientation).")
+    public void FaceOrientationChanged(String orientation) {
+        EventDispatcher.dispatchEvent(this, "FaceOrientationChanged", orientation);
+    }
+
+    @SimpleEvent(description =
+        "Fired when GetColorRGB responds. r, g, b: 0–255.")
+    public void ColorRGBRead(String port, int r, int g, int b) {
+        EventDispatcher.dispatchEvent(this, "ColorRGBRead", port, r, g, b);
+    }
+
+    @SimpleEvent(description =
+        "Fired when GetReflectedLight responds. value: 0–100 percent.")
+    public void ReflectedLightRead(String port, int value) {
+        EventDispatcher.dispatchEvent(this, "ReflectedLightRead", port, value);
+    }
+
     // =========================================================================
     // ColorConstant — exposes SensorColor option blocks for ColorRead comparisons
     // =========================================================================
