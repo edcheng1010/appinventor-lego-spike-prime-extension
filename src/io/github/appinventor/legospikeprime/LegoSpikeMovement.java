@@ -33,11 +33,13 @@ public class LegoSpikeMovement extends AndroidNonvisibleComponent {
 
     private LegoSpikeConnectivity connectivity;
 
-    private String leftPort      = "A";
-    private String rightPort     = "B";
-    private String direction     = "Forward";
-    private int    movementSpeed = 50;
-    private long   lastMoveSentMs = 0;
+    private String leftPort        = "A";
+    private String rightPort       = "B";
+    private String direction       = "Forward";
+    private int    movementSpeed   = 50;
+    private long   lastMoveSentMs  = 0;
+    private double cmPerRotation   = 17.6; // default: ~56mm wheel circumference
+    private String stopAction      = "brake";
     private static final long MOVE_THROTTLE_MS = 50; // 20Hz cap to prevent BLE flood
 
     public LegoSpikeMovement(ComponentContainer container) {
@@ -177,10 +179,72 @@ public class LegoSpikeMovement extends AndroidNonvisibleComponent {
     @SimpleFunction(description = "Stop the drivebase immediately")
     public void StopMoving() {
         if (!checkConnected()) return;
-        connectivity.sendSSP(
-            new SSPMessage("movement.stop")
-                .withParam("left", leftPort)
-                .withParam("right", rightPort));
+        connectivity.sendSSP(new SSPMessage("movement.stop")
+            .withParam("stop_action", stopAction));
+    }
+
+    // =========================================================================
+    // Phase 3 expansion blocks
+    // =========================================================================
+
+    @SimpleFunction(description =
+        "Move the drivebase for a specific amount. unit: 'ms', 'degrees', or 'rotations'.")
+    public void MoveForDuration(int amount, String unit) {
+        if (!checkConnected()) return;
+        int effectiveSpeed = direction.equalsIgnoreCase("backward") ? -movementSpeed : movementSpeed;
+        connectivity.sendSSP(new SSPMessage("movement.drive")
+            .withParam("left", leftPort).withParam("right", rightPort)
+            .withParam("speed", effectiveSpeed).withParam("steering", 0)
+            .withParam("duration", amount).withParam("duration_unit", unit));
+    }
+
+    @SimpleFunction(description =
+        "Move with steering for a specific amount. steering: –100 to +100. "
+        + "unit: 'ms', 'degrees', or 'rotations'.")
+    public void MoveWithSteeringForDuration(int steering, int amount, String unit) {
+        if (!checkConnected()) return;
+        int effectiveSpeed = direction.equalsIgnoreCase("backward") ? -movementSpeed : movementSpeed;
+        connectivity.sendSSP(new SSPMessage("movement.drive")
+            .withParam("left", leftPort).withParam("right", rightPort)
+            .withParam("speed", effectiveSpeed)
+            .withParam("steering", Math.max(-100, Math.min(100, steering)))
+            .withParam("duration", amount).withParam("duration_unit", unit));
+    }
+
+    @SimpleFunction(description =
+        "Tank drive: control left and right wheels independently. "
+        + "leftSpeed, rightSpeed: –100 to +100.")
+    public void StartMovingAtSpeed(int leftSpeed, int rightSpeed) {
+        if (!checkConnected()) return;
+        long now = System.currentTimeMillis();
+        if (now - lastMoveSentMs < MOVE_THROTTLE_MS) return;
+        lastMoveSentMs = now;
+        connectivity.sendSSP(new SSPMessage("movement.drive")
+            .withParam("left", leftPort).withParam("right", rightPort)
+            .withParam("left_speed",  Math.max(-100, Math.min(100, leftSpeed)))
+            .withParam("right_speed", Math.max(-100, Math.min(100, rightSpeed))));
+    }
+
+    @SimpleFunction(description =
+        "Set cm per full wheel rotation (used when MoveForDuration uses 'rotations' unit).")
+    public void SetMotorRotationDistance(double cmPerRotation) {
+        this.cmPerRotation = Math.max(0.1, cmPerRotation);
+    }
+
+    @SimpleFunction(description =
+        "Set the stop action applied by StopMoving: 'brake' (default), 'coast', or 'hold'.")
+    public void SetMovementBrakeAtStop(String mode) {
+        if ("coast".equals(mode) || "hold".equals(mode) || "brake".equals(mode)) {
+            this.stopAction = mode;
+        }
+    }
+
+    @SimpleFunction(description =
+        "Set the acceleration ramp rate for the drive base in milliseconds (0–10000).")
+    public void SetMovementAcceleration(int rate) {
+        if (!checkConnected()) return;
+        connectivity.sendSSP(new SSPMessage("movement.set_acceleration")
+            .withParam("rate", Math.max(0, Math.min(10000, rate))));
     }
 
     private boolean checkConnected() {

@@ -1,9 +1,13 @@
 package io.github.appinventor.legospikeprime;
 
+import android.os.Handler;
+import android.os.Looper;
+
 import com.google.appinventor.components.annotations.DesignerComponent;
 import com.google.appinventor.components.annotations.DesignerProperty;
 import com.google.appinventor.components.annotations.Options;
 import com.google.appinventor.components.annotations.PropertyCategory;
+import com.google.appinventor.components.annotations.SimpleEvent;
 import com.google.appinventor.components.annotations.SimpleFunction;
 import com.google.appinventor.components.annotations.SimpleObject;
 import com.google.appinventor.components.annotations.SimpleProperty;
@@ -12,18 +16,23 @@ import com.google.appinventor.components.common.PropertyTypeConstants;
 import com.google.appinventor.components.runtime.AndroidNonvisibleComponent;
 import com.google.appinventor.components.runtime.Component;
 import com.google.appinventor.components.runtime.ComponentContainer;
+import com.google.appinventor.components.runtime.EventDispatcher;
+
+import org.json.JSONObject;
 
 @SimpleObject(external = true)
-@DesignerComponent(version = 3,
+@DesignerComponent(version = 4,
     description = "Controls an individual motor on a LEGO SPIKE Prime hub. "
         + "Set Port (A-F) and Direction, then call StartMotor or StopMotor. "
         + "Set the Connectivity property to a LegoSpikeConnectivity component.",
     category = ComponentCategory.EXTENSION,
     nonVisible = true,
     iconName = "aiwebres/legospike.png")
-public class LegoSpikeMotors extends AndroidNonvisibleComponent {
+public class LegoSpikeMotors extends AndroidNonvisibleComponent
+        implements LegoSpikeConnectivity.HubDataListener {
 
     private LegoSpikeConnectivity connectivity;
+    private final Handler mainHandler = new Handler(Looper.getMainLooper());
 
     private String port      = "A";
     private String direction = "Clockwise";
@@ -41,8 +50,10 @@ public class LegoSpikeMotors extends AndroidNonvisibleComponent {
     @DesignerProperty(editorType = PropertyTypeConstants.PROPERTY_TYPE_COMPONENT
         + ":io.github.appinventor.legospikeprime.LegoSpikeConnectivity")
     public void Connectivity(Component component) {
+        if (this.connectivity != null) this.connectivity.removeDataListener(this);
         if (component instanceof LegoSpikeConnectivity) {
             this.connectivity = (LegoSpikeConnectivity) component;
+            this.connectivity.addDataListener(this);
         }
     }
 
@@ -114,6 +125,145 @@ public class LegoSpikeMotors extends AndroidNonvisibleComponent {
         "Set the motor speed (0–100). Applied on the next StartMotor call.")
     public void SetMotorSpeed(int value) {
         speed = Math.max(0, Math.min(100, value));
+    }
+
+    // =========================================================================
+    // Phase 3 expansion blocks
+    // =========================================================================
+
+    @SimpleFunction(description =
+        "Run the motor for a specific amount. unit: 'ms', 'degrees', or 'rotations'.")
+    public void RunMotorForDuration(int amount, String unit) {
+        if (!checkConnected()) return;
+        int effectiveSpeed = "counterclockwise".equalsIgnoreCase(direction) ? -speed : speed;
+        connectivity.sendSSP(new SSPMessage("motor.run")
+            .withPort(port)
+            .withParam("speed", effectiveSpeed)
+            .withParam("duration", amount)
+            .withParam("duration_unit", unit));
+    }
+
+    @SimpleFunction(description =
+        "Move the motor to an absolute position (0–359 degrees).")
+    public void MotorGoToPosition(int position) {
+        if (!checkConnected()) return;
+        connectivity.sendSSP(new SSPMessage("motor.goto")
+            .withPort(port)
+            .withParam("position", Math.max(0, Math.min(359, position)))
+            .withParam("speed", speed)
+            .withParam("mode", "absolute"));
+    }
+
+    @SimpleFunction(description =
+        "Move the motor forward or backward by a relative number of degrees.")
+    public void GoToRelativeMotorPosition(int degrees) {
+        if (!checkConnected()) return;
+        int d = "counterclockwise".equalsIgnoreCase(direction) ? -degrees : degrees;
+        connectivity.sendSSP(new SSPMessage("motor.goto")
+            .withPort(port)
+            .withParam("position", d)
+            .withParam("speed", speed)
+            .withParam("mode", "relative"));
+    }
+
+    @SimpleFunction(description = "Reset the motor's relative position counter to zero.")
+    public void ResetRelativeMotorPosition() {
+        if (!checkConnected()) return;
+        connectivity.sendSSP(new SSPMessage("motor.reset").withPort(port));
+    }
+
+    @SimpleFunction(description =
+        "Request the current motor position in degrees. Fires MotorPositionRead when received.")
+    public void GetMotorPosition() {
+        if (!checkConnected()) return;
+        connectivity.sendSSP(new SSPMessage("sensor.read")
+            .withPort(port).withParam("type", "position"));
+    }
+
+    @SimpleFunction(description =
+        "Request the current motor speed (percent). Fires MotorSpeedRead when received.")
+    public void GetMotorSpeed() {
+        if (!checkConnected()) return;
+        connectivity.sendSSP(new SSPMessage("sensor.read")
+            .withPort(port).withParam("type", "speed"));
+    }
+
+    @SimpleFunction(description =
+        "Run the motor using power (duty cycle) mode rather than speed (velocity) mode. "
+        + "power: 0–100 percent.")
+    public void StartMotorWithPower(int power) {
+        if (!checkConnected()) return;
+        int p = Math.max(0, Math.min(100, power));
+        int effectivePower = "counterclockwise".equalsIgnoreCase(direction) ? -p : p;
+        connectivity.sendSSP(new SSPMessage("motor.run")
+            .withPort(port)
+            .withParam("speed", effectivePower)
+            .withParam("mode", "power"));
+    }
+
+    @SimpleFunction(description =
+        "Stop the motor and coast (no active braking).")
+    public void StopAndCoastMotor() {
+        if (!checkConnected()) return;
+        connectivity.sendSSP(new SSPMessage("motor.stop")
+            .withPort(port).withParam("stop_action", "coast"));
+    }
+
+    @SimpleFunction(description =
+        "Set the acceleration ramp rate for this motor. "
+        + "rate: milliseconds to ramp from 0 to full speed (0–10000).")
+    public void SetMotorAcceleration(int rate) {
+        if (!checkConnected()) return;
+        connectivity.sendSSP(new SSPMessage("motor.set_acceleration")
+            .withPort(port)
+            .withParam("rate", Math.max(0, Math.min(10000, rate))));
+    }
+
+    // =========================================================================
+    // Events
+    // =========================================================================
+
+    @SimpleEvent(description =
+        "Fired when the hub responds to GetMotorPosition. degrees: current angle.")
+    public void MotorPositionRead(String port, int degrees) {
+        EventDispatcher.dispatchEvent(this, "MotorPositionRead", port, degrees);
+    }
+
+    @SimpleEvent(description =
+        "Fired when the hub responds to GetMotorSpeed. speed: current speed percent.")
+    public void MotorSpeedRead(String port, int speed) {
+        EventDispatcher.dispatchEvent(this, "MotorSpeedRead", port, speed);
+    }
+
+    // =========================================================================
+    // HubDataListener — parse SSP sensor events for motor ports
+    // =========================================================================
+    @Override
+    public void onHubData(String data) {
+        if (data == null || !data.startsWith("{")) return;
+        try {
+            JSONObject obj = new JSONObject(data);
+            if (!"sensor".equals(obj.optString("event"))) return;
+            final String p    = obj.optString("port");
+            final String type = obj.optString("type");
+            final Object val  = obj.opt("value");
+            if (val == null) return;
+
+            switch (type) {
+                case "position": {
+                    final int degrees = ((Number) val).intValue();
+                    mainHandler.post(() -> MotorPositionRead(p, degrees));
+                    break;
+                }
+                case "speed": {
+                    final int spd = ((Number) val).intValue();
+                    mainHandler.post(() -> MotorSpeedRead(p, spd));
+                    break;
+                }
+                default:
+                    break;
+            }
+        } catch (Exception ignored) {}
     }
 
     // =========================================================================
