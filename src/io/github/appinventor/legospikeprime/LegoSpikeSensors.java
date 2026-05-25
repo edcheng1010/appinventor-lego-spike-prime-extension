@@ -428,6 +428,26 @@ public class LegoSpikeSensors extends AndroidNonvisibleComponent
             .withPort("imu").withParam("type", "face_orientation"));
     }
 
+    @SimpleFunction(description = "Reset the hub yaw angle to zero.")
+    public void ResetYaw() {
+        if (!checkConnected()) return;
+        connectivity.sendSSP(new SSPMessage("orientation.reset_yaw"));
+    }
+
+    @SimpleFunction(description = "Set the hub yaw to a specific angle in degrees.")
+    public void SetYaw(int degrees) {
+        if (!checkConnected()) return;
+        connectivity.sendSSP(new SSPMessage("orientation.set_yaw").withParam("angle", degrees));
+    }
+
+    @SimpleFunction(description =
+        "Configure which face of the hub is 'up' for orientation readings. "
+        + "face: face_up, face_down, port_a_up, port_a_down, port_e_up, port_e_down.")
+    public void SetHubSensorOrientation(String face) {
+        if (!checkConnected()) return;
+        connectivity.sendSSP(new SSPMessage("orientation.set_reference").withParam("face", face));
+    }
+
     @SimpleFunction(description =
         "Subscribe to gesture events. GestureDetected fires whenever the hub detects a gesture.")
     public void SubscribeToGestures() {
