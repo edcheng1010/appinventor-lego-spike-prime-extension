@@ -282,7 +282,27 @@ public class LegoSpikeSensors extends AndroidNonvisibleComponent
         if (data == null || !data.startsWith("{")) return;
         try {
             JSONObject obj = new JSONObject(data);
-            if (!"sensor".equals(obj.optString("event"))) return;
+            String event = obj.optString("event");
+
+            // Button events come as system events
+            if ("system".equals(event)) {
+                final String metric = obj.optString("metric");
+                if (metric.startsWith("button.")) {
+                    final String btnName = metric.substring("button.".length());
+                    final String state   = obj.optString("value");
+                    mainHandler.post(() -> {
+                        if ("pressed".equals(state)) {
+                            WhenButtonPressed(btnName);
+                            if ("center".equals(btnName)) WhenHubButtonPressed();
+                        } else if ("released".equals(state)) {
+                            WhenButtonReleased(btnName);
+                        }
+                    });
+                }
+                return;
+            }
+
+            if (!"sensor".equals(event)) return;
 
             final String port = obj.optString("port");
             final String type = obj.optString("type");
@@ -449,6 +469,30 @@ public class LegoSpikeSensors extends AndroidNonvisibleComponent
     }
 
     @SimpleFunction(description =
+        "Subscribe to left hub button events. WhenButtonPressed/WhenButtonReleased fire on change.")
+    public void SubscribeToLeftButton() {
+        if (!checkConnected()) return;
+        connectivity.sendSSP(new SSPMessage("system.subscribe")
+            .withParam("metric", "button.left").withParam("interval", 100));
+    }
+
+    @SimpleFunction(description =
+        "Subscribe to right hub button events. WhenButtonPressed/WhenButtonReleased fire on change.")
+    public void SubscribeToRightButton() {
+        if (!checkConnected()) return;
+        connectivity.sendSSP(new SSPMessage("system.subscribe")
+            .withParam("metric", "button.right").withParam("interval", 100));
+    }
+
+    @SimpleFunction(description =
+        "Subscribe to center hub button events. WhenButtonPressed/WhenButtonReleased fire on change.")
+    public void SubscribeToCenterButton() {
+        if (!checkConnected()) return;
+        connectivity.sendSSP(new SSPMessage("system.subscribe")
+            .withParam("metric", "button.center").withParam("interval", 100));
+    }
+
+    @SimpleFunction(description =
         "Subscribe to gesture events. GestureDetected fires whenever the hub detects a gesture.")
     public void SubscribeToGestures() {
         if (!checkConnected()) return;
@@ -527,6 +571,23 @@ public class LegoSpikeSensors extends AndroidNonvisibleComponent
         "Fired when GetReflectedLight responds. value: 0–100 percent.")
     public void ReflectedLightRead(String port, int value) {
         EventDispatcher.dispatchEvent(this, "ReflectedLightRead", port, value);
+    }
+
+    @SimpleEvent(description =
+        "Fired when a hub button is pressed. button: 'left', 'right', or 'center'.")
+    public void WhenButtonPressed(String button) {
+        EventDispatcher.dispatchEvent(this, "WhenButtonPressed", button);
+    }
+
+    @SimpleEvent(description =
+        "Fired when a hub button is released. button: 'left', 'right', or 'center'.")
+    public void WhenButtonReleased(String button) {
+        EventDispatcher.dispatchEvent(this, "WhenButtonReleased", button);
+    }
+
+    @SimpleEvent(description = "Fired when the center button is pressed.")
+    public void WhenHubButtonPressed() {
+        EventDispatcher.dispatchEvent(this, "WhenHubButtonPressed");
     }
 
     // =========================================================================

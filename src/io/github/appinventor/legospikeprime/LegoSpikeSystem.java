@@ -88,24 +88,6 @@ public class LegoSpikeSystem extends AndroidNonvisibleComponent
         sendSystem("connection_rssi", 5000);
     }
 
-    @SimpleFunction(description =
-        "Subscribe to left button events. WhenButtonPressed / WhenButtonReleased fire on change.")
-    public void SubscribeToLeftButton() {
-        subscribeButton("button.left");
-    }
-
-    @SimpleFunction(description =
-        "Subscribe to right button events. WhenButtonPressed / WhenButtonReleased fire on change.")
-    public void SubscribeToRightButton() {
-        subscribeButton("button.right");
-    }
-
-    @SimpleFunction(description =
-        "Subscribe to center button events. WhenButtonPressed / WhenButtonReleased fire on change.")
-    public void SubscribeToCenterButton() {
-        subscribeButton("button.center");
-    }
-
     // =========================================================================
     // Events
     // =========================================================================
@@ -128,24 +110,6 @@ public class LegoSpikeSystem extends AndroidNonvisibleComponent
     @SimpleEvent(description = "Fired when BLE RSSI is received. rssi: dBm (negative number).")
     public void RSSIRead(int rssi) {
         EventDispatcher.dispatchEvent(this, "RSSIRead", rssi);
-    }
-
-    @SimpleEvent(description =
-        "Fired when a hub button is pressed. button: 'left', 'right', or 'center'.")
-    public void WhenButtonPressed(String button) {
-        EventDispatcher.dispatchEvent(this, "WhenButtonPressed", button);
-    }
-
-    @SimpleEvent(description =
-        "Fired when a hub button is released. button: 'left', 'right', or 'center'.")
-    public void WhenButtonReleased(String button) {
-        EventDispatcher.dispatchEvent(this, "WhenButtonReleased", button);
-    }
-
-    @SimpleEvent(description =
-        "Fired when the center button is pressed (convenience alias for WhenButtonPressed).")
-    public void WhenHubButtonPressed() {
-        EventDispatcher.dispatchEvent(this, "WhenHubButtonPressed");
     }
 
     // =========================================================================
@@ -184,21 +148,8 @@ public class LegoSpikeSystem extends AndroidNonvisibleComponent
                     mainHandler.post(() -> RSSIRead(rssi));
                     break;
                 }
-                default: {
-                    if (metric.startsWith("button.")) {
-                        final String btnName = metric.substring("button.".length());
-                        final String state   = val.toString();
-                        mainHandler.post(() -> {
-                            if ("pressed".equals(state)) {
-                                WhenButtonPressed(btnName);
-                                if ("center".equals(btnName)) WhenHubButtonPressed();
-                            } else if ("released".equals(state)) {
-                                WhenButtonReleased(btnName);
-                            }
-                        });
-                    }
+                default:
                     break;
-                }
             }
         } catch (Exception ignored) {}
     }
@@ -213,7 +164,7 @@ public class LegoSpikeSystem extends AndroidNonvisibleComponent
             .withParam("interval", intervalMs));
     }
 
-    private void subscribeButton(String metric) {
+    private void subscribeButtonMetric(String metric) {
         if (!checkConnected()) return;
         connectivity.sendSSP(new SSPMessage("system.subscribe")
             .withParam("metric", metric)
