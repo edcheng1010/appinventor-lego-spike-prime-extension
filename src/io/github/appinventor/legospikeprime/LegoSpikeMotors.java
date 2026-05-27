@@ -171,7 +171,7 @@ public class LegoSpikeMotors extends AndroidNonvisibleComponent
 
     @SimpleFunction(description =
         "Move the motor to an absolute position (0–359 degrees).")
-    public void GoToMotorPosition(int position) {
+    public void GoToMotorAbsolutePosition(int position) {
         if (!checkConnected()) return;
         connectivity.sendSSP(new SSPMessage("motor.goto")
             .withPort(port)
@@ -182,7 +182,7 @@ public class LegoSpikeMotors extends AndroidNonvisibleComponent
 
     @SimpleFunction(description =
         "Move the motor forward or backward by a relative number of degrees.")
-    public void GoToRelativeMotorPosition(int degrees) {
+    public void GoToMotorRelativePosition(int degrees) {
         if (!checkConnected()) return;
         int d = "counterclockwise".equalsIgnoreCase(direction) ? -degrees : degrees;
         connectivity.sendSSP(new SSPMessage("motor.goto")
@@ -193,7 +193,7 @@ public class LegoSpikeMotors extends AndroidNonvisibleComponent
     }
 
     @SimpleFunction(description =
-        "Reset the relative position counter that GetMotorPosition reports — like a trip odometer. "
+        "Reset the relative position counter that GetMotorRelativePosition reports — like a trip odometer. "
         + "No physical movement. Does NOT affect GoToRelativeMotorPosition (which always moves "
         + "relative to where the motor currently is, regardless of this counter).")
     public void ResetRelativeMotorPosition() {
@@ -204,8 +204,8 @@ public class LegoSpikeMotors extends AndroidNonvisibleComponent
     @SimpleFunction(description =
         "Request the cumulative motor position since last ResetRelativeMotorPosition "
         + "(can exceed 360 or go negative — useful for tracking distance traveled). "
-        + "Async — wire MotorPositionRead(port, degrees) to receive the value.")
-    public void GetMotorPosition() {
+        + "Async — wire MotorRelativePositionRead(port, degrees) to receive the value.")
+    public void GetMotorRelativePosition() {
         if (!checkConnected()) return;
         connectivity.sendSSP(new SSPMessage("sensor.read")
             .withPort(port).withParam("type", "position"));
@@ -256,10 +256,10 @@ public class LegoSpikeMotors extends AndroidNonvisibleComponent
     // =========================================================================
 
     @SimpleEvent(description =
-        "Fired when the hub responds to GetMotorPosition. "
+        "Fired when the hub responds to GetMotorRelativePosition. "
         + "degrees: cumulative position since last reset (can be > 360 or negative).")
-    public void MotorPositionRead(String port, int degrees) {
-        EventDispatcher.dispatchEvent(this, "MotorPositionRead", port, degrees);
+    public void MotorRelativePositionRead(String port, int degrees) {
+        EventDispatcher.dispatchEvent(this, "MotorRelativePositionRead", port, degrees);
     }
 
     @SimpleEvent(description =
@@ -292,7 +292,7 @@ public class LegoSpikeMotors extends AndroidNonvisibleComponent
             switch (type) {
                 case "position": {
                     final int degrees = ((Number) val).intValue();
-                    mainHandler.post(() -> MotorPositionRead(p, degrees));
+                    mainHandler.post(() -> MotorRelativePositionRead(p, degrees));
                     break;
                 }
                 case "absolute_position": {
