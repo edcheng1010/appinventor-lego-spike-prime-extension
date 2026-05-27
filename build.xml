@@ -168,7 +168,7 @@
       <!-- OptionList.java has no dependencies and can be compiled standalone -->
       <src path="${ai2.components.dir}/src"/>
       <include name="com/google/appinventor/components/common/OptionList.java"/>
-      <!-- Our 7 OptionList enum files -->
+      <!-- Our 8 OptionList enum files -->
       <src path="${src.dir}/io/github/appinventor/legospikeprime"/>
       <include name="Port.java"/>
       <include name="MotorDirection.java"/>
@@ -177,6 +177,7 @@
       <include name="LightMatrixImage.java"/>
       <include name="SensorColor.java"/>
       <include name="TiltAxis.java"/>
+      <include name="DurationUnit.java"/>
     </javac>
 
     <echo>precompile-enums step 2: building AnnotationProcessors dir</echo>

@@ -132,15 +132,23 @@ public class LegoSpikeMotors extends AndroidNonvisibleComponent
     // =========================================================================
 
     @SimpleFunction(description =
-        "Run the motor for a specific amount. unit: 'ms', 'degrees', or 'rotations'.")
-    public void RunMotorForDuration(int amount, String unit) {
+        "Run the motor for a specific amount. "
+        + "Use the DurationUnit constant blocks (Milliseconds, Degrees, Rotations).")
+    public void RunMotorForDuration(int amount, @Options(DurationUnit.class) String unit) {
         if (!checkConnected()) return;
         int effectiveSpeed = "counterclockwise".equalsIgnoreCase(direction) ? -speed : speed;
         connectivity.sendSSP(new SSPMessage("motor.run")
             .withPort(port)
             .withParam("speed", effectiveSpeed)
             .withParam("duration", amount)
-            .withParam("duration_unit", unit));
+            .withParam("duration_unit", normaliseUnit(unit)));
+    }
+
+    /** Accepts either the SSP wire value ("ms") or the enum label ("Milliseconds"). */
+    private static String normaliseUnit(String unit) {
+        if (unit == null) return "ms";
+        DurationUnit du = DurationUnit.fromUnderlyingValue(unit);
+        return du != null ? du.toUnderlyingValue() : unit;
     }
 
     @SimpleFunction(description =

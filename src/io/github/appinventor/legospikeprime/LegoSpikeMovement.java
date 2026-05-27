@@ -188,27 +188,36 @@ public class LegoSpikeMovement extends AndroidNonvisibleComponent {
     // =========================================================================
 
     @SimpleFunction(description =
-        "Move the drivebase for a specific amount. unit: 'ms', 'degrees', or 'rotations'.")
-    public void MoveForDuration(int amount, String unit) {
+        "Move the drivebase for a specific amount. "
+        + "Use the DurationUnit constant blocks (Milliseconds, Degrees, Rotations).")
+    public void MoveForDuration(int amount, @Options(DurationUnit.class) String unit) {
         if (!checkConnected()) return;
         int effectiveSpeed = direction.equalsIgnoreCase("backward") ? -movementSpeed : movementSpeed;
         connectivity.sendSSP(new SSPMessage("movement.drive")
             .withParam("left", leftPort).withParam("right", rightPort)
             .withParam("speed", effectiveSpeed).withParam("steering", 0)
-            .withParam("duration", amount).withParam("duration_unit", unit));
+            .withParam("duration", amount).withParam("duration_unit", normaliseUnit(unit)));
     }
 
     @SimpleFunction(description =
         "Move with steering for a specific amount. steering: –100 to +100. "
-        + "unit: 'ms', 'degrees', or 'rotations'.")
-    public void MoveWithSteeringForDuration(int steering, int amount, String unit) {
+        + "Use the DurationUnit constant blocks for the unit.")
+    public void MoveWithSteeringForDuration(int steering, int amount,
+                                             @Options(DurationUnit.class) String unit) {
         if (!checkConnected()) return;
         int effectiveSpeed = direction.equalsIgnoreCase("backward") ? -movementSpeed : movementSpeed;
         connectivity.sendSSP(new SSPMessage("movement.drive")
             .withParam("left", leftPort).withParam("right", rightPort)
             .withParam("speed", effectiveSpeed)
             .withParam("steering", Math.max(-100, Math.min(100, steering)))
-            .withParam("duration", amount).withParam("duration_unit", unit));
+            .withParam("duration", amount).withParam("duration_unit", normaliseUnit(unit)));
+    }
+
+    /** Accepts either the SSP wire value ("ms") or the enum label ("Milliseconds"). */
+    private static String normaliseUnit(String unit) {
+        if (unit == null) return "ms";
+        DurationUnit du = DurationUnit.fromUnderlyingValue(unit);
+        return du != null ? du.toUnderlyingValue() : unit;
     }
 
     @SimpleFunction(description =
