@@ -248,18 +248,13 @@ def _read_sensor_value(port_id, sensor_type):
                     continue
         return None
     if sensor_type == 'speed':
-        # motor.speed() returns 0-8 on SPIKE 3.x firmware (8 = 100%) — scale to percent
-        fn = getattr(motor, 'speed', None)
-        if fn is not None:
-            try:
-                return int(fn(p) * 12.5)
-            except Exception:
-                pass
-        # motor.velocity returns deg/s on some FW versions (divide by 11 for percent)
+        # On observed SPIKE Prime 3.x firmware, motor.velocity(port) returns the
+        # current speed already in PERCENT (-100..100), not deg/s as the docs claim.
+        # At 100% speed setting it reads ~88 due to closed-loop tracking.
         fn = getattr(motor, 'velocity', None) or getattr(motor, 'get_velocity', None)
         if fn is not None:
             try:
-                return int(fn(p) / 11)
+                return int(fn(p))
             except Exception:
                 pass
         return None

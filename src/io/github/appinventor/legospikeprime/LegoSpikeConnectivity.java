@@ -329,18 +329,13 @@ public class LegoSpikeConnectivity extends AndroidNonvisibleComponent {
         "                    continue\n" +
         "        return None\n" +
         "    if sensor_type == 'speed':\n" +
-        "        # motor.speed() returns 0-8 on SPIKE 3.x firmware (8 = 100%) — scale to percent\n" +
-        "        fn = getattr(motor, 'speed', None)\n" +
-        "        if fn is not None:\n" +
-        "            try:\n" +
-        "                return int(fn(p) * 12.5)\n" +
-        "            except Exception:\n" +
-        "                pass\n" +
-        "        # motor.velocity returns deg/s on some FW versions (divide by 11 for percent)\n" +
+        "        # On observed SPIKE Prime 3.x firmware, motor.velocity(port) returns the\n" +
+        "        # current speed already in PERCENT (-100..100), not deg/s as the docs claim.\n" +
+        "        # At 100% speed setting it reads ~88 due to closed-loop tracking.\n" +
         "        fn = getattr(motor, 'velocity', None) or getattr(motor, 'get_velocity', None)\n" +
         "        if fn is not None:\n" +
         "            try:\n" +
-        "                return int(fn(p) / 11)\n" +
+        "                return int(fn(p))\n" +
         "            except Exception:\n" +
         "                pass\n" +
         "        return None\n" +
