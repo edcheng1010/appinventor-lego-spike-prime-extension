@@ -37,6 +37,8 @@ public class LegoSpikeMotors extends AndroidNonvisibleComponent
     private String port      = "A";
     private String direction = "Clockwise";
     private int    speed     = 50;
+    private int    power     = 50;
+    private String motorMode = "speed"; // "speed" or "power"
 
     public LegoSpikeMotors(ComponentContainer container) {
         super(container.$form());
@@ -104,15 +106,22 @@ public class LegoSpikeMotors extends AndroidNonvisibleComponent
     // Motor control blocks
     // =========================================================================
     @SimpleFunction(description =
-        "Start the motor using the configured Port and Direction. "
+        "Start the motor using the last SetMotorSpeed or SetMotorPower configuration. "
         + "Set Port and Direction in the Designer or via blocks first.")
     public void StartMotor() {
         if (!checkConnected()) return;
-        int effectiveSpeed = "counterclockwise".equalsIgnoreCase(direction) ? -speed : speed;
-        connectivity.sendSSP(
-            new SSPMessage("motor.run")
+        if ("power".equals(motorMode)) {
+            int effectivePower = "counterclockwise".equalsIgnoreCase(direction) ? -power : power;
+            connectivity.sendSSP(new SSPMessage("motor.run")
+                .withPort(port)
+                .withParam("speed", effectivePower)
+                .withParam("mode", "power"));
+        } else {
+            int effectiveSpeed = "counterclockwise".equalsIgnoreCase(direction) ? -speed : speed;
+            connectivity.sendSSP(new SSPMessage("motor.run")
                 .withPort(port)
                 .withParam("speed", effectiveSpeed));
+        }
     }
 
     @SimpleFunction(description = "Stop the motor on the configured Port")
@@ -122,9 +131,18 @@ public class LegoSpikeMotors extends AndroidNonvisibleComponent
     }
 
     @SimpleFunction(description =
-        "Set the motor speed (0–100). Applied on the next StartMotor call.")
+        "Set the motor speed (0–100) and switch to speed mode. Applied on the next StartMotor call.")
     public void SetMotorSpeed(int value) {
         speed = Math.max(0, Math.min(100, value));
+        motorMode = "speed";
+    }
+
+    @SimpleFunction(description =
+        "Set the motor power (0–100, duty cycle) and switch to power mode. Applied on the next StartMotor call. "
+        + "Unlike speed mode, the motor does not compensate for load — it slows down under resistance.")
+    public void SetMotorPower(int value) {
+        power = Math.max(0, Math.min(100, value));
+        motorMode = "power";
     }
 
     // =========================================================================
@@ -210,19 +228,6 @@ public class LegoSpikeMotors extends AndroidNonvisibleComponent
         if (!checkConnected()) return;
         connectivity.sendSSP(new SSPMessage("sensor.read")
             .withPort(port).withParam("type", "speed"));
-    }
-
-    @SimpleFunction(description =
-        "Run the motor using power (duty cycle) mode rather than speed (velocity) mode. "
-        + "power: 0–100 percent.")
-    public void StartMotorWithPower(int power) {
-        if (!checkConnected()) return;
-        int p = Math.max(0, Math.min(100, power));
-        int effectivePower = "counterclockwise".equalsIgnoreCase(direction) ? -p : p;
-        connectivity.sendSSP(new SSPMessage("motor.run")
-            .withPort(port)
-            .withParam("speed", effectivePower)
-            .withParam("mode", "power"));
     }
 
     @SimpleFunction(description =
