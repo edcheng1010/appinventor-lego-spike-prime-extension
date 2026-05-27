@@ -248,11 +248,11 @@ def _read_sensor_value(port_id, sensor_type):
                     continue
         return None
     if sensor_type == 'speed':
-        # motor.speed returns percent directly — prefer it
+        # motor.speed() returns 0-8 on SPIKE 3.x firmware (8 = 100%) — scale to percent
         fn = getattr(motor, 'speed', None)
         if fn is not None:
             try:
-                return int(fn(p))
+                return int(fn(p) * 12.5)
             except Exception:
                 pass
         # motor.velocity returns deg/s on some FW versions (divide by 11 for percent)
