@@ -219,15 +219,24 @@ def _read_sensor_value(port_id, sensor_type):
     if p is None:
         return None
 
-    # Motor position / speed reading (no _sensors_ok guard needed)
-    try:
-        if sensor_type == 'position':
-            return motor.relative_position(p)
-        elif sensor_type == 'speed':
-            vel = motor.velocity(p)  # degrees/second
-            # convert back to ±100 percent
-            return int(vel / 11)
-    except Exception:
+    # Motor position / speed reading — try multiple FW 3.x function names
+    if sensor_type == 'position':
+        for fn_name in ('relative_position', 'absolute_position', 'get_position'):
+            fn = getattr(motor, fn_name, None)
+            if fn is not None:
+                try:
+                    return fn(p)
+                except Exception:
+                    continue
+        return None
+    if sensor_type == 'speed':
+        for fn_name in ('velocity', 'get_velocity', 'speed'):
+            fn = getattr(motor, fn_name, None)
+            if fn is not None:
+                try:
+                    return int(fn(p) / 11)  # deg/s back to ±100 percent
+                except Exception:
+                    continue
         return None
 
     if not _sensors_ok:
@@ -420,8 +429,14 @@ def _handle_motor(cmd, obj, req_id):
                     elif unit == 'rotations':
                         motor.run_for_degrees(p, dur * 360, spd)
             else:
-                # Indefinite run — motor.run() has no acceleration parameter in FW 3.x
-                motor.run(p, spd)
+                # Indefinite run — try acceleration kwarg first (newer FW), fall back
+                if accel:
+                    try:
+                        motor.run(p, spd, acceleration=accel)
+                    except TypeError:
+                        motor.run(p, spd)
+                else:
+                    motor.run(p, spd)
 
         elif action == 'stop':
             stop_action = obj.get('stop_action', 'brake')
@@ -434,37 +449,38 @@ def _handle_motor(cmd, obj, req_id):
 
         elif action == 'goto':
             pos = int(obj.get('position', 0))
-            spd = abs(int(obj.get('speed', 50))) * 11  # absolute-position calls need positive velocity
+            spd = abs(int(obj.get('speed', 50))) * 11
             goto_mode = obj.get('mode', 'absolute')
             if goto_mode == 'relative':
                 motor.run_for_degrees(p, pos, spd)
             else:
-                # Absolute goto — try multiple FW 3.x signatures, surface specific error.
-                direction = getattr(motor, 'SHORTEST_PATH', 0)
-                attempts = [
-                    # FW 3.x official: separate function, positional direction
-                    lambda: motor.run_to_absolute_position(p, pos, direction, spd),
-                    # FW variant: kwarg direction on run_to_position
-                    lambda: motor.run_to_position(p, pos, spd, direction=direction),
-                    # Older form (may no-op silently if FW expects direction)
-                    lambda: motor.run_to_position(p, pos, spd),
-                ]
-                success = False
-                last_err = None
-                for attempt in attempts:
+                # Absolute goto via delta-of-run_for_degrees workaround.
+                # SPIKE FW 3.x absolute-position APIs vary too much across versions
+                # (run_to_position vs run_to_absolute_position with different signatures),
+                # but motor.run_for_degrees is reliably present. We compute the shortest
+                # delta from current absolute position to the target and run that.
+                target = pos % 360
+                current = None
+                # Try canonical FW 3.x function names for current position
+                for fn_name in ('absolute_position', 'relative_position'):
+                    fn = getattr(motor, fn_name, None)
+                    if fn is not None:
+                        try:
+                            current = fn(p) % 360
+                            break
+                        except Exception:
+                            pass
+                if current is None:
+                    _send_error(301, 'goto: cannot read current motor position', req_id)
+                else:
+                    delta = target - current
+                    if delta > 180:   delta -= 360
+                    elif delta < -180: delta += 360
                     try:
-                        attempt()
-                        success = True
-                        break
-                    except (AttributeError, TypeError) as e:
-                        # Signature mismatch — try next form
-                        last_err = '%s: %s' % (type(e).__name__, str(e))
+                        motor.run_for_degrees(p, delta, spd)
                     except Exception as e:
-                        # Real runtime error — stop trying, report it
-                        last_err = '%s: %s' % (type(e).__name__, str(e))
-                        break
-                if not success:
-                    _send_error(301, 'goto failed: ' + (last_err or 'unknown'), req_id)
+                        _send_error(301, 'goto failed: %s: %s' %
+                                    (type(e).__name__, str(e)), req_id)
 
         elif action == 'reset':
             motor.reset_relative_position(p, 0)

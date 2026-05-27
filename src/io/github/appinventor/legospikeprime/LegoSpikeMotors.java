@@ -167,15 +167,17 @@ public class LegoSpikeMotors extends AndroidNonvisibleComponent
     }
 
     @SimpleFunction(description =
-        "Reset the motor's relative position counter to zero. "
-        + "No physical movement — the motor stays where it is; only the position reading changes.")
+        "Reset the relative position counter that GetMotorPosition reports — like a trip odometer. "
+        + "No physical movement. Does NOT affect GoToRelativeMotorPosition (which always moves "
+        + "relative to where the motor currently is, regardless of this counter).")
     public void ResetRelativeMotorPosition() {
         if (!checkConnected()) return;
         connectivity.sendSSP(new SSPMessage("motor.reset").withPort(port));
     }
 
     @SimpleFunction(description =
-        "Request the current motor position in degrees. Fires MotorPositionRead when received.")
+        "Request the current motor position. This is asynchronous — wire the "
+        + "MotorPositionRead(port, degrees) event to receive the value when the hub responds.")
     public void GetMotorPosition() {
         if (!checkConnected()) return;
         connectivity.sendSSP(new SSPMessage("sensor.read")
@@ -183,7 +185,8 @@ public class LegoSpikeMotors extends AndroidNonvisibleComponent
     }
 
     @SimpleFunction(description =
-        "Request the current motor speed (percent). Fires MotorSpeedRead when received.")
+        "Request the current motor speed. This is asynchronous — wire the "
+        + "MotorSpeedRead(port, speed) event to receive the value when the hub responds.")
     public void GetMotorSpeed() {
         if (!checkConnected()) return;
         connectivity.sendSSP(new SSPMessage("sensor.read")
@@ -204,7 +207,9 @@ public class LegoSpikeMotors extends AndroidNonvisibleComponent
     }
 
     @SimpleFunction(description =
-        "Stop the motor and coast (no active braking).")
+        "Stop the motor and coast (no active braking — motor free-spins to a stop). "
+        + "Difference vs StopMotor is most noticeable at higher speeds or under load; "
+        + "at low speeds and no load the SPIKE motor decelerates quickly either way.")
     public void StopAndCoastMotor() {
         if (!checkConnected()) return;
         connectivity.sendSSP(new SSPMessage("motor.stop")
@@ -212,9 +217,9 @@ public class LegoSpikeMotors extends AndroidNonvisibleComponent
     }
 
     @SimpleFunction(description =
-        "Set the acceleration ramp rate for timed motor runs (RunMotorForDuration). "
-        + "rate: milliseconds to ramp from 0 to full speed (0–10000). "
-        + "No effect on StartMotor (continuous run — SPIKE FW limitation).")
+        "Set the acceleration ramp rate (ms to reach full speed, 0–10000). "
+        + "Applies to RunMotorForDuration and, if the hub firmware supports it, "
+        + "to StartMotor as well. Effect is most visible at higher speeds.")
     public void SetMotorAcceleration(int rate) {
         if (!checkConnected()) return;
         connectivity.sendSSP(new SSPMessage("motor.set_acceleration")

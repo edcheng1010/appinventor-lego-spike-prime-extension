@@ -300,15 +300,24 @@ public class LegoSpikeConnectivity extends AndroidNonvisibleComponent {
         "    if p is None:\n" +
         "        return None\n" +
         "\n" +
-        "    # Motor position / speed reading (no _sensors_ok guard needed)\n" +
-        "    try:\n" +
-        "        if sensor_type == 'position':\n" +
-        "            return motor.relative_position(p)\n" +
-        "        elif sensor_type == 'speed':\n" +
-        "            vel = motor.velocity(p)  # degrees/second\n" +
-        "            # convert back to ±100 percent\n" +
-        "            return int(vel / 11)\n" +
-        "    except Exception:\n" +
+        "    # Motor position / speed reading — try multiple FW 3.x function names\n" +
+        "    if sensor_type == 'position':\n" +
+        "        for fn_name in ('relative_position', 'absolute_position', 'get_position'):\n" +
+        "            fn = getattr(motor, fn_name, None)\n" +
+        "            if fn is not None:\n" +
+        "                try:\n" +
+        "                    return fn(p)\n" +
+        "                except Exception:\n" +
+        "                    continue\n" +
+        "        return None\n" +
+        "    if sensor_type == 'speed':\n" +
+        "        for fn_name in ('velocity', 'get_velocity', 'speed'):\n" +
+        "            fn = getattr(motor, fn_name, None)\n" +
+        "            if fn is not None:\n" +
+        "                try:\n" +
+        "                    return int(fn(p) / 11)  # deg/s back to ±100 percent\n" +
+        "                except Exception:\n" +
+        "                    continue\n" +
         "        return None\n" +
         "\n" +
         "    if not _sensors_ok:\n" +
@@ -501,8 +510,14 @@ public class LegoSpikeConnectivity extends AndroidNonvisibleComponent {
         "                    elif unit == 'rotations':\n" +
         "                        motor.run_for_degrees(p, dur * 360, spd)\n" +
         "            else:\n" +
-        "                # Indefinite run — motor.run() has no acceleration parameter in FW 3.x\n" +
-        "                motor.run(p, spd)\n" +
+        "                # Indefinite run — try acceleration kwarg first (newer FW), fall back\n" +
+        "                if accel:\n" +
+        "                    try:\n" +
+        "                        motor.run(p, spd, acceleration=accel)\n" +
+        "                    except TypeError:\n" +
+        "                        motor.run(p, spd)\n" +
+        "                else:\n" +
+        "                    motor.run(p, spd)\n" +
         "\n" +
         "        elif action == 'stop':\n" +
         "            stop_action = obj.get('stop_action', 'brake')\n" +
@@ -515,37 +530,38 @@ public class LegoSpikeConnectivity extends AndroidNonvisibleComponent {
         "\n" +
         "        elif action == 'goto':\n" +
         "            pos = int(obj.get('position', 0))\n" +
-        "            spd = abs(int(obj.get('speed', 50))) * 11  # absolute-position calls need positive velocity\n" +
+        "            spd = abs(int(obj.get('speed', 50))) * 11\n" +
         "            goto_mode = obj.get('mode', 'absolute')\n" +
         "            if goto_mode == 'relative':\n" +
         "                motor.run_for_degrees(p, pos, spd)\n" +
         "            else:\n" +
-        "                # Absolute goto — try multiple FW 3.x signatures, surface specific error.\n" +
-        "                direction = getattr(motor, 'SHORTEST_PATH', 0)\n" +
-        "                attempts = [\n" +
-        "                    # FW 3.x official: separate function, positional direction\n" +
-        "                    lambda: motor.run_to_absolute_position(p, pos, direction, spd),\n" +
-        "                    # FW variant: kwarg direction on run_to_position\n" +
-        "                    lambda: motor.run_to_position(p, pos, spd, direction=direction),\n" +
-        "                    # Older form (may no-op silently if FW expects direction)\n" +
-        "                    lambda: motor.run_to_position(p, pos, spd),\n" +
-        "                ]\n" +
-        "                success = False\n" +
-        "                last_err = None\n" +
-        "                for attempt in attempts:\n" +
+        "                # Absolute goto via delta-of-run_for_degrees workaround.\n" +
+        "                # SPIKE FW 3.x absolute-position APIs vary too much across versions\n" +
+        "                # (run_to_position vs run_to_absolute_position with different signatures),\n" +
+        "                # but motor.run_for_degrees is reliably present. We compute the shortest\n" +
+        "                # delta from current absolute position to the target and run that.\n" +
+        "                target = pos % 360\n" +
+        "                current = None\n" +
+        "                # Try canonical FW 3.x function names for current position\n" +
+        "                for fn_name in ('absolute_position', 'relative_position'):\n" +
+        "                    fn = getattr(motor, fn_name, None)\n" +
+        "                    if fn is not None:\n" +
+        "                        try:\n" +
+        "                            current = fn(p) % 360\n" +
+        "                            break\n" +
+        "                        except Exception:\n" +
+        "                            pass\n" +
+        "                if current is None:\n" +
+        "                    _send_error(301, 'goto: cannot read current motor position', req_id)\n" +
+        "                else:\n" +
+        "                    delta = target - current\n" +
+        "                    if delta > 180:   delta -= 360\n" +
+        "                    elif delta < -180: delta += 360\n" +
         "                    try:\n" +
-        "                        attempt()\n" +
-        "                        success = True\n" +
-        "                        break\n" +
-        "                    except (AttributeError, TypeError) as e:\n" +
-        "                        # Signature mismatch — try next form\n" +
-        "                        last_err = '%s: %s' % (type(e).__name__, str(e))\n" +
+        "                        motor.run_for_degrees(p, delta, spd)\n" +
         "                    except Exception as e:\n" +
-        "                        # Real runtime error — stop trying, report it\n" +
-        "                        last_err = '%s: %s' % (type(e).__name__, str(e))\n" +
-        "                        break\n" +
-        "                if not success:\n" +
-        "                    _send_error(301, 'goto failed: ' + (last_err or 'unknown'), req_id)\n" +
+        "                        _send_error(301, 'goto failed: %s: %s' %\n" +
+        "                                    (type(e).__name__, str(e)), req_id)\n" +
         "\n" +
         "        elif action == 'reset':\n" +
         "            motor.reset_relative_position(p, 0)\n" +
