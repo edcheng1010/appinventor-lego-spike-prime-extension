@@ -184,12 +184,23 @@ public class LegoSpikeMotors extends AndroidNonvisibleComponent
     }
 
     @SimpleFunction(description =
-        "Request the current motor position. This is asynchronous — wire the "
-        + "MotorPositionRead(port, degrees) event to receive the value when the hub responds.")
+        "Request the cumulative motor position since last ResetRelativeMotorPosition "
+        + "(can exceed 360 or go negative — useful for tracking distance traveled). "
+        + "Async — wire MotorPositionRead(port, degrees) to receive the value.")
     public void GetMotorPosition() {
         if (!checkConnected()) return;
         connectivity.sendSSP(new SSPMessage("sensor.read")
             .withPort(port).withParam("type", "position"));
+    }
+
+    @SimpleFunction(description =
+        "Request the current motor orientation as an angle in 0–359 degrees "
+        + "(useful for knowing which way a steering wheel or arm joint is pointing). "
+        + "Async — wire MotorAbsolutePositionRead(port, degrees) to receive the value.")
+    public void GetMotorAbsolutePosition() {
+        if (!checkConnected()) return;
+        connectivity.sendSSP(new SSPMessage("sensor.read")
+            .withPort(port).withParam("type", "absolute_position"));
     }
 
     @SimpleFunction(description =
@@ -240,9 +251,17 @@ public class LegoSpikeMotors extends AndroidNonvisibleComponent
     // =========================================================================
 
     @SimpleEvent(description =
-        "Fired when the hub responds to GetMotorPosition. degrees: current angle.")
+        "Fired when the hub responds to GetMotorPosition. "
+        + "degrees: cumulative position since last reset (can be > 360 or negative).")
     public void MotorPositionRead(String port, int degrees) {
         EventDispatcher.dispatchEvent(this, "MotorPositionRead", port, degrees);
+    }
+
+    @SimpleEvent(description =
+        "Fired when the hub responds to GetMotorAbsolutePosition. "
+        + "degrees: current motor orientation, 0–359.")
+    public void MotorAbsolutePositionRead(String port, int degrees) {
+        EventDispatcher.dispatchEvent(this, "MotorAbsolutePositionRead", port, degrees);
     }
 
     @SimpleEvent(description =
@@ -269,6 +288,11 @@ public class LegoSpikeMotors extends AndroidNonvisibleComponent
                 case "position": {
                     final int degrees = ((Number) val).intValue();
                     mainHandler.post(() -> MotorPositionRead(p, degrees));
+                    break;
+                }
+                case "absolute_position": {
+                    final int degrees = ((Number) val).intValue();
+                    mainHandler.post(() -> MotorAbsolutePositionRead(p, degrees));
                     break;
                 }
                 case "speed": {

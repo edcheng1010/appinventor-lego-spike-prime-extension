@@ -302,7 +302,8 @@ public class LegoSpikeConnectivity extends AndroidNonvisibleComponent {
         "\n" +
         "    # Motor position / speed reading — try multiple FW 3.x function names\n" +
         "    if sensor_type == 'position':\n" +
-        "        for fn_name in ('relative_position', 'absolute_position', 'get_position'):\n" +
+        "        # Cumulative position since last reset (can exceed 360 or be negative)\n" +
+        "        for fn_name in ('relative_position', 'get_position'):\n" +
         "            fn = getattr(motor, fn_name, None)\n" +
         "            if fn is not None:\n" +
         "                try:\n" +
@@ -310,14 +311,38 @@ public class LegoSpikeConnectivity extends AndroidNonvisibleComponent {
         "                except Exception:\n" +
         "                    continue\n" +
         "        return None\n" +
-        "    if sensor_type == 'speed':\n" +
-        "        for fn_name in ('velocity', 'get_velocity', 'speed'):\n" +
+        "    if sensor_type == 'absolute_position':\n" +
+        "        # Current orientation 0-359\n" +
+        "        fn = getattr(motor, 'absolute_position', None)\n" +
+        "        if fn is not None:\n" +
+        "            try:\n" +
+        "                return fn(p)\n" +
+        "            except Exception:\n" +
+        "                return None\n" +
+        "        # Fallback: cumulative position mod 360\n" +
+        "        for fn_name in ('relative_position', 'get_position'):\n" +
         "            fn = getattr(motor, fn_name, None)\n" +
         "            if fn is not None:\n" +
         "                try:\n" +
-        "                    return int(fn(p) / 11)  # deg/s back to ±100 percent\n" +
+        "                    return fn(p) % 360\n" +
         "                except Exception:\n" +
         "                    continue\n" +
+        "        return None\n" +
+        "    if sensor_type == 'speed':\n" +
+        "        # motor.velocity returns deg/s (divide by 11 for percent)\n" +
+        "        fn = getattr(motor, 'velocity', None) or getattr(motor, 'get_velocity', None)\n" +
+        "        if fn is not None:\n" +
+        "            try:\n" +
+        "                return int(fn(p) / 11)\n" +
+        "            except Exception:\n" +
+        "                pass\n" +
+        "        # motor.speed returns percent directly (don't divide)\n" +
+        "        fn = getattr(motor, 'speed', None)\n" +
+        "        if fn is not None:\n" +
+        "            try:\n" +
+        "                return int(fn(p))\n" +
+        "            except Exception:\n" +
+        "                pass\n" +
         "        return None\n" +
         "\n" +
         "    if not _sensors_ok:\n" +
@@ -486,6 +511,29 @@ public class LegoSpikeConnectivity extends AndroidNonvisibleComponent {
         "        if action == 'run':\n" +
         "            raw_speed = int(obj.get('speed', 0))\n" +
         "            mode = obj.get('mode', 'speed')\n" +
+        "\n" +
+        "            # Power mode: open-loop raw duty cycle, no velocity feedback.\n" +
+        "            # SPIKE FW 3.x exposes this differently across versions — try known APIs.\n" +
+        "            if mode == 'power':\n" +
+        "                # raw_speed is -100..+100 percent duty cycle\n" +
+        "                power_pct = max(-100, min(100, raw_speed))\n" +
+        "                attempts = [\n" +
+        "                    lambda: motor.start_at_power(p, power_pct),\n" +
+        "                    lambda: motor.run(p, power_pct, mode=getattr(motor, 'POWER', 1)),\n" +
+        "                    # Last resort: scale to velocity range (approximate)\n" +
+        "                    lambda: motor.run(p, power_pct * 11),\n" +
+        "                ]\n" +
+        "                for attempt in attempts:\n" +
+        "                    try:\n" +
+        "                        attempt()\n" +
+        "                        break\n" +
+        "                    except (AttributeError, TypeError):\n" +
+        "                        continue\n" +
+        "                    except Exception as e:\n" +
+        "                        _send_error(301, 'motor.run power: ' + str(e), req_id)\n" +
+        "                        break\n" +
+        "                return\n" +
+        "\n" +
         "            spd = raw_speed * 11\n" +
         "            dur = obj.get('duration')\n" +
         "            unit = obj.get('duration_unit', 'ms')\n" +
@@ -521,10 +569,23 @@ public class LegoSpikeConnectivity extends AndroidNonvisibleComponent {
         "\n" +
         "        elif action == 'stop':\n" +
         "            stop_action = obj.get('stop_action', 'brake')\n" +
+        "            # Map our string to the FW constant if available\n" +
+        "            stop_const = None\n" +
         "            if stop_action == 'coast':\n" +
-        "                motor.stop(p, stop=motor.COAST)\n" +
+        "                stop_const = getattr(motor, 'COAST', None)\n" +
         "            elif stop_action == 'hold':\n" +
-        "                motor.stop(p, stop=motor.HOLD)\n" +
+        "                stop_const = getattr(motor, 'HOLD', None)\n" +
+        "            elif stop_action == 'brake':\n" +
+        "                stop_const = getattr(motor, 'BRAKE', None) or getattr(motor, 'SMART_BRAKING', None)\n" +
+        "            # Try with kwarg, then positional, then plain stop\n" +
+        "            if stop_const is not None:\n" +
+        "                try:\n" +
+        "                    motor.stop(p, stop=stop_const)\n" +
+        "                except TypeError:\n" +
+        "                    try:\n" +
+        "                        motor.stop(p, stop_const)\n" +
+        "                    except TypeError:\n" +
+        "                        motor.stop(p)\n" +
         "            else:\n" +
         "                motor.stop(p)\n" +
         "\n" +
@@ -619,8 +680,21 @@ public class LegoSpikeConnectivity extends AndroidNonvisibleComponent {
         "\n" +
         "        elif action == 'stop':\n" +
         "            stop_action = obj.get('stop_action', 'brake')\n" +
+        "            stop_const = None\n" +
         "            if stop_action == 'coast':\n" +
-        "                motor_pair.stop(motor_pair.PAIR_1, stop=motor_pair.COAST)\n" +
+        "                stop_const = getattr(motor_pair, 'COAST', None)\n" +
+        "            elif stop_action == 'hold':\n" +
+        "                stop_const = getattr(motor_pair, 'HOLD', None)\n" +
+        "            elif stop_action == 'brake':\n" +
+        "                stop_const = getattr(motor_pair, 'BRAKE', None) or getattr(motor_pair, 'SMART_BRAKING', None)\n" +
+        "            if stop_const is not None:\n" +
+        "                try:\n" +
+        "                    motor_pair.stop(motor_pair.PAIR_1, stop=stop_const)\n" +
+        "                except TypeError:\n" +
+        "                    try:\n" +
+        "                        motor_pair.stop(motor_pair.PAIR_1, stop_const)\n" +
+        "                    except TypeError:\n" +
+        "                        motor_pair.stop(motor_pair.PAIR_1)\n" +
         "            else:\n" +
         "                motor_pair.stop(motor_pair.PAIR_1)\n" +
         "\n" +
@@ -1084,17 +1158,35 @@ public class LegoSpikeConnectivity extends AndroidNonvisibleComponent {
 
     private Timer heartbeatTimer = null;
     private volatile long lastPongMs = 0;
+    private volatile long lastTickMs = 0;
     private static final long HEARTBEAT_INTERVAL_MS = 5000;
     private static final long PONG_TIMEOUT_MS       = 10000;
 
     private void startHeartbeat() {
         stopHeartbeat();
-        lastPongMs = System.currentTimeMillis();
+        long now = System.currentTimeMillis();
+        lastPongMs = now;
+        lastTickMs = now;
         heartbeatTimer = new Timer("SSPHeartbeat", true);
         heartbeatTimer.scheduleAtFixedRate(new TimerTask() {
             @Override public void run() {
                 if (!isConnected) { cancel(); return; }
-                long since = System.currentTimeMillis() - lastPongMs;
+                long n = System.currentTimeMillis();
+                long tickGap = n - lastTickMs;
+                lastTickMs = n;
+
+                // Detect timer suspension (Android backgrounding throttles Java Timers).
+                // If the previous tick was way later than expected, the app was likely
+                // backgrounded — assume hub is still alive, reset state, send fresh ping
+                // and re-evaluate next cycle. Avoids false OnHeartbeatLost on foreground.
+                if (tickGap > HEARTBEAT_INTERVAL_MS * 2) {
+                    logDebug("Heartbeat: timer gap " + tickGap + "ms — backgrounded?, resetting");
+                    lastPongMs = n;
+                    sendSSP(new SSPMessage("system.ping"));
+                    return;
+                }
+
+                long since = n - lastPongMs;
                 if (since > PONG_TIMEOUT_MS) {
                     cancel();           // stop this TimerTask from firing again
                     heartbeatTimer = null;

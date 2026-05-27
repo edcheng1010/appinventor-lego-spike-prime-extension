@@ -221,7 +221,8 @@ def _read_sensor_value(port_id, sensor_type):
 
     # Motor position / speed reading — try multiple FW 3.x function names
     if sensor_type == 'position':
-        for fn_name in ('relative_position', 'absolute_position', 'get_position'):
+        # Cumulative position since last reset (can exceed 360 or be negative)
+        for fn_name in ('relative_position', 'get_position'):
             fn = getattr(motor, fn_name, None)
             if fn is not None:
                 try:
@@ -229,14 +230,38 @@ def _read_sensor_value(port_id, sensor_type):
                 except Exception:
                     continue
         return None
-    if sensor_type == 'speed':
-        for fn_name in ('velocity', 'get_velocity', 'speed'):
+    if sensor_type == 'absolute_position':
+        # Current orientation 0-359
+        fn = getattr(motor, 'absolute_position', None)
+        if fn is not None:
+            try:
+                return fn(p)
+            except Exception:
+                return None
+        # Fallback: cumulative position mod 360
+        for fn_name in ('relative_position', 'get_position'):
             fn = getattr(motor, fn_name, None)
             if fn is not None:
                 try:
-                    return int(fn(p) / 11)  # deg/s back to ±100 percent
+                    return fn(p) % 360
                 except Exception:
                     continue
+        return None
+    if sensor_type == 'speed':
+        # motor.velocity returns deg/s (divide by 11 for percent)
+        fn = getattr(motor, 'velocity', None) or getattr(motor, 'get_velocity', None)
+        if fn is not None:
+            try:
+                return int(fn(p) / 11)
+            except Exception:
+                pass
+        # motor.speed returns percent directly (don't divide)
+        fn = getattr(motor, 'speed', None)
+        if fn is not None:
+            try:
+                return int(fn(p))
+            except Exception:
+                pass
         return None
 
     if not _sensors_ok:
@@ -405,6 +430,29 @@ def _handle_motor(cmd, obj, req_id):
         if action == 'run':
             raw_speed = int(obj.get('speed', 0))
             mode = obj.get('mode', 'speed')
+
+            # Power mode: open-loop raw duty cycle, no velocity feedback.
+            # SPIKE FW 3.x exposes this differently across versions — try known APIs.
+            if mode == 'power':
+                # raw_speed is -100..+100 percent duty cycle
+                power_pct = max(-100, min(100, raw_speed))
+                attempts = [
+                    lambda: motor.start_at_power(p, power_pct),
+                    lambda: motor.run(p, power_pct, mode=getattr(motor, 'POWER', 1)),
+                    # Last resort: scale to velocity range (approximate)
+                    lambda: motor.run(p, power_pct * 11),
+                ]
+                for attempt in attempts:
+                    try:
+                        attempt()
+                        break
+                    except (AttributeError, TypeError):
+                        continue
+                    except Exception as e:
+                        _send_error(301, 'motor.run power: ' + str(e), req_id)
+                        break
+                return
+
             spd = raw_speed * 11
             dur = obj.get('duration')
             unit = obj.get('duration_unit', 'ms')
@@ -440,10 +488,23 @@ def _handle_motor(cmd, obj, req_id):
 
         elif action == 'stop':
             stop_action = obj.get('stop_action', 'brake')
+            # Map our string to the FW constant if available
+            stop_const = None
             if stop_action == 'coast':
-                motor.stop(p, stop=motor.COAST)
+                stop_const = getattr(motor, 'COAST', None)
             elif stop_action == 'hold':
-                motor.stop(p, stop=motor.HOLD)
+                stop_const = getattr(motor, 'HOLD', None)
+            elif stop_action == 'brake':
+                stop_const = getattr(motor, 'BRAKE', None) or getattr(motor, 'SMART_BRAKING', None)
+            # Try with kwarg, then positional, then plain stop
+            if stop_const is not None:
+                try:
+                    motor.stop(p, stop=stop_const)
+                except TypeError:
+                    try:
+                        motor.stop(p, stop_const)
+                    except TypeError:
+                        motor.stop(p)
             else:
                 motor.stop(p)
 
@@ -538,8 +599,21 @@ def _handle_movement(cmd, obj, req_id):
 
         elif action == 'stop':
             stop_action = obj.get('stop_action', 'brake')
+            stop_const = None
             if stop_action == 'coast':
-                motor_pair.stop(motor_pair.PAIR_1, stop=motor_pair.COAST)
+                stop_const = getattr(motor_pair, 'COAST', None)
+            elif stop_action == 'hold':
+                stop_const = getattr(motor_pair, 'HOLD', None)
+            elif stop_action == 'brake':
+                stop_const = getattr(motor_pair, 'BRAKE', None) or getattr(motor_pair, 'SMART_BRAKING', None)
+            if stop_const is not None:
+                try:
+                    motor_pair.stop(motor_pair.PAIR_1, stop=stop_const)
+                except TypeError:
+                    try:
+                        motor_pair.stop(motor_pair.PAIR_1, stop_const)
+                    except TypeError:
+                        motor_pair.stop(motor_pair.PAIR_1)
             else:
                 motor_pair.stop(motor_pair.PAIR_1)
 
