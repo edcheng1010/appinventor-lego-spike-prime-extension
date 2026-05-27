@@ -145,7 +145,7 @@ public class LegoSpikeMotors extends AndroidNonvisibleComponent
 
     @SimpleFunction(description =
         "Move the motor to an absolute position (0–359 degrees).")
-    public void MotorGoToPosition(int position) {
+    public void GoToMotorPosition(int position) {
         if (!checkConnected()) return;
         connectivity.sendSSP(new SSPMessage("motor.goto")
             .withPort(port)
@@ -166,7 +166,9 @@ public class LegoSpikeMotors extends AndroidNonvisibleComponent
             .withParam("mode", "relative"));
     }
 
-    @SimpleFunction(description = "Reset the motor's relative position counter to zero.")
+    @SimpleFunction(description =
+        "Reset the motor's relative position counter to zero. "
+        + "No physical movement — the motor stays where it is; only the position reading changes.")
     public void ResetRelativeMotorPosition() {
         if (!checkConnected()) return;
         connectivity.sendSSP(new SSPMessage("motor.reset").withPort(port));
@@ -210,8 +212,9 @@ public class LegoSpikeMotors extends AndroidNonvisibleComponent
     }
 
     @SimpleFunction(description =
-        "Set the acceleration ramp rate for this motor. "
-        + "rate: milliseconds to ramp from 0 to full speed (0–10000).")
+        "Set the acceleration ramp rate for timed motor runs (RunMotorForDuration). "
+        + "rate: milliseconds to ramp from 0 to full speed (0–10000). "
+        + "No effect on StartMotor (continuous run — SPIKE FW limitation).")
     public void SetMotorAcceleration(int rate) {
         if (!checkConnected()) return;
         connectivity.sendSSP(new SSPMessage("motor.set_acceleration")

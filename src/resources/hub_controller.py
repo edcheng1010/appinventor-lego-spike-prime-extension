@@ -216,7 +216,21 @@ def _read_sensor_value(port_id, sensor_type):
             return None
 
     p = PORTS.get(port_id.upper())
-    if p is None or not _sensors_ok:
+    if p is None:
+        return None
+
+    # Motor position / speed reading (no _sensors_ok guard needed)
+    try:
+        if sensor_type == 'position':
+            return motor.relative_position(p)
+        elif sensor_type == 'speed':
+            vel = motor.velocity(p)  # degrees/second
+            # convert back to ±100 percent
+            return int(vel / 11)
+    except Exception:
+        return None
+
+    if not _sensors_ok:
         return None
     try:
         if sensor_type == 'color':
@@ -382,20 +396,31 @@ def _handle_motor(cmd, obj, req_id):
         if action == 'run':
             raw_speed = int(obj.get('speed', 0))
             mode = obj.get('mode', 'speed')
-            # Power mode: treat speed param as 0-100% duty cycle (same scaling on SPIKE)
             spd = raw_speed * 11
             dur = obj.get('duration')
             unit = obj.get('duration_unit', 'ms')
+            # Apply cached acceleration for timed runs (SPIKE FW supports kwarg)
+            accel = _motor_acceleration.get(port_id.upper(), None)
             if dur is not None:
                 dur = int(dur)
-                if unit == 'ms':
-                    motor.run_for_time(p, dur, spd)
-                elif unit == 'degrees':
-                    motor.run_for_degrees(p, dur, spd)
-                elif unit == 'rotations':
-                    motor.run_for_degrees(p, dur * 360, spd)
+                accel_kwargs = {'acceleration': accel, 'deceleration': accel} if accel else {}
+                try:
+                    if unit == 'ms':
+                        motor.run_for_time(p, dur, spd, **accel_kwargs)
+                    elif unit == 'degrees':
+                        motor.run_for_degrees(p, dur, spd, **accel_kwargs)
+                    elif unit == 'rotations':
+                        motor.run_for_degrees(p, dur * 360, spd, **accel_kwargs)
+                except TypeError:
+                    # FW version doesn't support acceleration kwargs — run without
+                    if unit == 'ms':
+                        motor.run_for_time(p, dur, spd)
+                    elif unit == 'degrees':
+                        motor.run_for_degrees(p, dur, spd)
+                    elif unit == 'rotations':
+                        motor.run_for_degrees(p, dur * 360, spd)
             else:
-                # omitting duration = run indefinitely (v0.8 §6.1)
+                # Indefinite run — motor.run() has no acceleration parameter in FW 3.x
                 motor.run(p, spd)
 
         elif action == 'stop':
@@ -409,14 +434,16 @@ def _handle_motor(cmd, obj, req_id):
 
         elif action == 'goto':
             pos = int(obj.get('position', 0))
-            spd = int(obj.get('speed', 50)) * 11
+            spd = abs(int(obj.get('speed', 50))) * 11  # run_to_position needs positive velocity
             goto_mode = obj.get('mode', 'absolute')
             if goto_mode == 'relative':
-                # Relative: run_for_degrees from current position
                 motor.run_for_degrees(p, pos, spd)
             else:
-                # Absolute (default)
-                motor.run_to_position(p, pos, spd)
+                # Absolute: SHORTEST_PATH direction (FW 3.x constant may vary)
+                try:
+                    motor.run_to_position(p, pos, spd, direction=motor.SHORTEST_PATH)
+                except TypeError:
+                    motor.run_to_position(p, pos, spd)
 
         elif action == 'reset':
             motor.reset_relative_position(p, 0)

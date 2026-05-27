@@ -297,7 +297,21 @@ public class LegoSpikeConnectivity extends AndroidNonvisibleComponent {
         "            return None\n" +
         "\n" +
         "    p = PORTS.get(port_id.upper())\n" +
-        "    if p is None or not _sensors_ok:\n" +
+        "    if p is None:\n" +
+        "        return None\n" +
+        "\n" +
+        "    # Motor position / speed reading (no _sensors_ok guard needed)\n" +
+        "    try:\n" +
+        "        if sensor_type == 'position':\n" +
+        "            return motor.relative_position(p)\n" +
+        "        elif sensor_type == 'speed':\n" +
+        "            vel = motor.velocity(p)  # degrees/second\n" +
+        "            # convert back to ±100 percent\n" +
+        "            return int(vel / 11)\n" +
+        "    except Exception:\n" +
+        "        return None\n" +
+        "\n" +
+        "    if not _sensors_ok:\n" +
         "        return None\n" +
         "    try:\n" +
         "        if sensor_type == 'color':\n" +
@@ -463,20 +477,31 @@ public class LegoSpikeConnectivity extends AndroidNonvisibleComponent {
         "        if action == 'run':\n" +
         "            raw_speed = int(obj.get('speed', 0))\n" +
         "            mode = obj.get('mode', 'speed')\n" +
-        "            # Power mode: treat speed param as 0-100% duty cycle (same scaling on SPIKE)\n" +
         "            spd = raw_speed * 11\n" +
         "            dur = obj.get('duration')\n" +
         "            unit = obj.get('duration_unit', 'ms')\n" +
+        "            # Apply cached acceleration for timed runs (SPIKE FW supports kwarg)\n" +
+        "            accel = _motor_acceleration.get(port_id.upper(), None)\n" +
         "            if dur is not None:\n" +
         "                dur = int(dur)\n" +
-        "                if unit == 'ms':\n" +
-        "                    motor.run_for_time(p, dur, spd)\n" +
-        "                elif unit == 'degrees':\n" +
-        "                    motor.run_for_degrees(p, dur, spd)\n" +
-        "                elif unit == 'rotations':\n" +
-        "                    motor.run_for_degrees(p, dur * 360, spd)\n" +
+        "                accel_kwargs = {'acceleration': accel, 'deceleration': accel} if accel else {}\n" +
+        "                try:\n" +
+        "                    if unit == 'ms':\n" +
+        "                        motor.run_for_time(p, dur, spd, **accel_kwargs)\n" +
+        "                    elif unit == 'degrees':\n" +
+        "                        motor.run_for_degrees(p, dur, spd, **accel_kwargs)\n" +
+        "                    elif unit == 'rotations':\n" +
+        "                        motor.run_for_degrees(p, dur * 360, spd, **accel_kwargs)\n" +
+        "                except TypeError:\n" +
+        "                    # FW version doesn't support acceleration kwargs — run without\n" +
+        "                    if unit == 'ms':\n" +
+        "                        motor.run_for_time(p, dur, spd)\n" +
+        "                    elif unit == 'degrees':\n" +
+        "                        motor.run_for_degrees(p, dur, spd)\n" +
+        "                    elif unit == 'rotations':\n" +
+        "                        motor.run_for_degrees(p, dur * 360, spd)\n" +
         "            else:\n" +
-        "                # omitting duration = run indefinitely (v0.8 §6.1)\n" +
+        "                # Indefinite run — motor.run() has no acceleration parameter in FW 3.x\n" +
         "                motor.run(p, spd)\n" +
         "\n" +
         "        elif action == 'stop':\n" +
@@ -490,14 +515,16 @@ public class LegoSpikeConnectivity extends AndroidNonvisibleComponent {
         "\n" +
         "        elif action == 'goto':\n" +
         "            pos = int(obj.get('position', 0))\n" +
-        "            spd = int(obj.get('speed', 50)) * 11\n" +
+        "            spd = abs(int(obj.get('speed', 50))) * 11  # run_to_position needs positive velocity\n" +
         "            goto_mode = obj.get('mode', 'absolute')\n" +
         "            if goto_mode == 'relative':\n" +
-        "                # Relative: run_for_degrees from current position\n" +
         "                motor.run_for_degrees(p, pos, spd)\n" +
         "            else:\n" +
-        "                # Absolute (default)\n" +
-        "                motor.run_to_position(p, pos, spd)\n" +
+        "                # Absolute: SHORTEST_PATH direction (FW 3.x constant may vary)\n" +
+        "                try:\n" +
+        "                    motor.run_to_position(p, pos, spd, direction=motor.SHORTEST_PATH)\n" +
+        "                except TypeError:\n" +
+        "                    motor.run_to_position(p, pos, spd)\n" +
         "\n" +
         "        elif action == 'reset':\n" +
         "            motor.reset_relative_position(p, 0)\n" +
