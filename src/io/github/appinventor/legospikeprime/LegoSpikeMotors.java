@@ -34,11 +34,12 @@ public class LegoSpikeMotors extends AndroidNonvisibleComponent
     private LegoSpikeConnectivity connectivity;
     private final Handler mainHandler = new Handler(Looper.getMainLooper());
 
-    private String port      = "A";
-    private String direction = "Clockwise";
-    private int    speed     = 50;
-    private int    power     = 50;
-    private String motorMode = "speed"; // "speed" or "power"
+    private String port       = "A";
+    private String direction  = "Clockwise";
+    private int    speed      = 50;
+    private int    power      = 50;
+    private String motorMode  = "speed"; // "speed" or "power"
+    private String stopAction = "brake";
 
     public LegoSpikeMotors(ComponentContainer container) {
         super(container.$form());
@@ -124,10 +125,21 @@ public class LegoSpikeMotors extends AndroidNonvisibleComponent
         }
     }
 
-    @SimpleFunction(description = "Stop the motor on the configured Port")
+    @SimpleFunction(description =
+        "Stop the motor using the stop action configured by SetMotorBrakeAtStop (default: Brake).")
     public void StopMotor() {
         if (!checkConnected()) return;
-        connectivity.sendSSP(new SSPMessage("motor.stop").withPort(port));
+        connectivity.sendSSP(new SSPMessage("motor.stop")
+            .withPort(port).withParam("stop_action", stopAction));
+    }
+
+    @SimpleFunction(description =
+        "Set the stop action used by StopMotor. "
+        + "Brake (default): electrical braking. Coast: free-spin to stop. "
+        + "Hold: actively locks position — note: Hold may not resist manual rotation on all firmware versions.")
+    public void SetMotorBrakeAtStop(@Options(StopAction.class) String action) {
+        StopAction sa = StopAction.fromUnderlyingValue(action);
+        stopAction = sa != null ? sa.toUnderlyingValue() : "brake";
     }
 
     @SimpleFunction(description =
@@ -228,16 +240,6 @@ public class LegoSpikeMotors extends AndroidNonvisibleComponent
         if (!checkConnected()) return;
         connectivity.sendSSP(new SSPMessage("sensor.read")
             .withPort(port).withParam("type", "speed"));
-    }
-
-    @SimpleFunction(description =
-        "Stop the motor and coast (no active braking — motor free-spins to a stop). "
-        + "Difference vs StopMotor is most noticeable at higher speeds or under load; "
-        + "at low speeds and no load the SPIKE motor decelerates quickly either way.")
-    public void StopAndCoastMotor() {
-        if (!checkConnected()) return;
-        connectivity.sendSSP(new SSPMessage("motor.stop")
-            .withPort(port).withParam("stop_action", "coast"));
     }
 
     @SimpleFunction(description =

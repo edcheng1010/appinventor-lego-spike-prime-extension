@@ -241,11 +241,12 @@ public class LegoSpikeMovement extends AndroidNonvisibleComponent {
     }
 
     @SimpleFunction(description =
-        "Set the stop action applied by StopMoving: 'brake' (default), 'coast', or 'hold'.")
-    public void SetMovementBrakeAtStop(String mode) {
-        if ("coast".equals(mode) || "hold".equals(mode) || "brake".equals(mode)) {
-            this.stopAction = mode;
-        }
+        "Set the stop action applied by StopMoving. "
+        + "Brake (default): electrical braking. Coast: free-spin to stop. "
+        + "Hold: actively locks position — note: Hold may not resist manual rotation on all firmware versions.")
+    public void SetMovementBrakeAtStop(@Options(StopAction.class) String mode) {
+        StopAction sa = StopAction.fromUnderlyingValue(mode);
+        this.stopAction = sa != null ? sa.toUnderlyingValue() : "brake";
     }
 
     @SimpleFunction(description =
