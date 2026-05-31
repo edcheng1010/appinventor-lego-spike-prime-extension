@@ -912,6 +912,16 @@ def _handle_system(cmd, obj, req_id):
         pass  # no-op on this platform
 
 
+def _handle_timer(cmd, obj, req_id):
+    global _timer_start
+    action = cmd.split('.')[1]  # get, reset
+    if action == 'get':
+        elapsed_ms = time.ticks_diff(time.ticks_ms(), _timer_start)
+        _sensor_event('timer', 'elapsed', elapsed_ms // 1000, req_id)
+    elif action == 'reset':
+        _timer_start = time.ticks_ms()
+
+
 def _handle_orientation(cmd, obj, req_id):
     """v0.7 orientation.* command category."""
     action = cmd.split('.')[1]  # set_yaw, reset_yaw, set_reference
@@ -985,6 +995,8 @@ def on_message(data):
             _handle_sensor(cmd, obj, req_id)
         elif cmd.startswith('system.'):
             _handle_system(cmd, obj, req_id)
+        elif cmd.startswith('timer.'):
+            _handle_timer(cmd, obj, req_id)
         elif cmd.startswith('orientation.'):
             _handle_orientation(cmd, obj, req_id)
         else:

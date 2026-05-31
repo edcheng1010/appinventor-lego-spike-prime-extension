@@ -47,7 +47,6 @@ public class LegoSpikeSensors extends AndroidNonvisibleComponent
     private String colorSensorPort    = "C";
     private String distanceSensorPort = "D";
     private String pressureSensorPort = "E";
-    private long   timerStartMs       = System.currentTimeMillis();
 
     // Accumulator for GetHubOrientation — assembles pitch+roll+yaw before firing HubOrientationRead.
     private volatile boolean orientationReadPending = false;
@@ -195,24 +194,17 @@ public class LegoSpikeSensors extends AndroidNonvisibleComponent
             .withPort("imu").withParam("type", name));
     }
 
-    /**
-     * Request the elapsed time since the last ResetTimer call.
-     * Fires TimerRead(seconds) when the hub responds.
-     */
     @SimpleFunction(description =
-        "Request the elapsed time (seconds) since the last ResetTimer. "
-        + "Fires TimerRead when the hub responds.")
-    public void GetTimer() {
-        // Timer is now client-side; fire event directly
-        long elapsed = (System.currentTimeMillis() - timerStartMs) / 1000;
-        final long e = elapsed;
-        mainHandler.post(() -> TimerRead((int) e));
+        "Request the elapsed time (seconds) on the hub's clock since the last ResetHubTimer. "
+        + "Fires HubTimerRead when the hub responds.")
+    public void GetHubTimer() {
+        sendSensorSSP(new SSPMessage("timer.get"));
     }
 
-    /** Reset the hub timer to zero. */
-    @SimpleFunction(description = "Reset the hub timer to zero")
-    public void ResetTimer() {
-        timerStartMs = System.currentTimeMillis();
+    @SimpleFunction(description = "Reset the hub's built-in timer to zero.")
+    public void ResetHubTimer() {
+        if (!checkConnected()) return;
+        connectivity.sendSSP(new SSPMessage("timer.reset"));
     }
 
     // =========================================================================
@@ -261,9 +253,9 @@ public class LegoSpikeSensors extends AndroidNonvisibleComponent
     }
 
     @SimpleEvent(description =
-        "Fired when the hub reports the elapsed timer value in whole seconds.")
-    public void TimerRead(int seconds) {
-        EventDispatcher.dispatchEvent(this, "TimerRead", seconds);
+        "Fired when GetHubTimer responds. seconds: elapsed time on the hub's clock since last ResetHubTimer.")
+    public void HubTimerRead(int seconds) {
+        EventDispatcher.dispatchEvent(this, "HubTimerRead", seconds);
     }
 
     // =========================================================================
@@ -406,6 +398,15 @@ public class LegoSpikeSensors extends AndroidNonvisibleComponent
                             ? ((Number) val).intValue()
                             : Integer.parseInt(val.toString());
                         mainHandler.post(() -> ReflectedLightRead(port, v));
+                    } catch (Exception ignored) {}
+                    break;
+                }
+                case "elapsed": {
+                    try {
+                        final int seconds = val instanceof Number
+                            ? ((Number) val).intValue()
+                            : Integer.parseInt(val.toString());
+                        mainHandler.post(() -> HubTimerRead(seconds));
                     } catch (Exception ignored) {}
                     break;
                 }

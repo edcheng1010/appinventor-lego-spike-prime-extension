@@ -992,6 +992,16 @@ public class LegoSpikeConnectivity extends AndroidNonvisibleComponent {
         "        pass  # no-op on this platform\n" +
         "\n" +
         "\n" +
+        "def _handle_timer(cmd, obj, req_id):\n" +
+        "    global _timer_start\n" +
+        "    action = cmd.split('.')[1]  # get, reset\n" +
+        "    if action == 'get':\n" +
+        "        elapsed_ms = time.ticks_diff(time.ticks_ms(), _timer_start)\n" +
+        "        _sensor_event('timer', 'elapsed', elapsed_ms // 1000, req_id)\n" +
+        "    elif action == 'reset':\n" +
+        "        _timer_start = time.ticks_ms()\n" +
+        "\n" +
+        "\n" +
         "def _handle_orientation(cmd, obj, req_id):\n" +
         "    \"\"\"v0.7 orientation.* command category.\"\"\"\n" +
         "    action = cmd.split('.')[1]  # set_yaw, reset_yaw, set_reference\n" +
@@ -1065,6 +1075,8 @@ public class LegoSpikeConnectivity extends AndroidNonvisibleComponent {
         "            _handle_sensor(cmd, obj, req_id)\n" +
         "        elif cmd.startswith('system.'):\n" +
         "            _handle_system(cmd, obj, req_id)\n" +
+        "        elif cmd.startswith('timer.'):\n" +
+        "            _handle_timer(cmd, obj, req_id)\n" +
         "        elif cmd.startswith('orientation.'):\n" +
         "            _handle_orientation(cmd, obj, req_id)\n" +
         "        else:\n" +
