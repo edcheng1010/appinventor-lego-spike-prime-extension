@@ -687,6 +687,7 @@ def _handle_movement(cmd, obj, req_id):
 
 
 def _handle_led(cmd, obj, req_id):
+    global _matrix_pixels, _matrix_brightness, _matrix_orientation
     parts = cmd.split('.')  # ['led', ...] or ['led', 'matrix', 'pixel']
     if len(parts) == 2:
         action = parts[1]  # set, off
@@ -723,22 +724,18 @@ def _handle_led(cmd, obj, req_id):
                 light_matrix.write(text)
 
             elif action == 'clear':
-                global _matrix_pixels
                 _matrix_pixels = [[0] * 5 for _ in range(5)]
                 _render_matrix()
 
             elif action == 'brightness':
-                global _matrix_brightness
                 _matrix_brightness = max(0, min(100, int(obj.get('level', 100))))
                 _render_matrix()
 
             elif action == 'orientation':
-                global _matrix_orientation
                 _matrix_orientation = int(obj.get('rotation', 0)) % 360
                 _render_matrix()
 
             elif action == 'rotate':
-                global _matrix_orientation
                 degrees = int(obj.get('degrees', 90))
                 _matrix_orientation = (_matrix_orientation + degrees) % 360
                 _render_matrix()

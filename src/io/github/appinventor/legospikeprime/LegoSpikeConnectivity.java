@@ -768,6 +768,7 @@ public class LegoSpikeConnectivity extends AndroidNonvisibleComponent {
         "\n" +
         "\n" +
         "def _handle_led(cmd, obj, req_id):\n" +
+        "    global _matrix_pixels, _matrix_brightness, _matrix_orientation\n" +
         "    parts = cmd.split('.')  # ['led', ...] or ['led', 'matrix', 'pixel']\n" +
         "    if len(parts) == 2:\n" +
         "        action = parts[1]  # set, off\n" +
@@ -804,22 +805,18 @@ public class LegoSpikeConnectivity extends AndroidNonvisibleComponent {
         "                light_matrix.write(text)\n" +
         "\n" +
         "            elif action == 'clear':\n" +
-        "                global _matrix_pixels\n" +
         "                _matrix_pixels = [[0] * 5 for _ in range(5)]\n" +
         "                _render_matrix()\n" +
         "\n" +
         "            elif action == 'brightness':\n" +
-        "                global _matrix_brightness\n" +
         "                _matrix_brightness = max(0, min(100, int(obj.get('level', 100))))\n" +
         "                _render_matrix()\n" +
         "\n" +
         "            elif action == 'orientation':\n" +
-        "                global _matrix_orientation\n" +
         "                _matrix_orientation = int(obj.get('rotation', 0)) % 360\n" +
         "                _render_matrix()\n" +
         "\n" +
         "            elif action == 'rotate':\n" +
-        "                global _matrix_orientation\n" +
         "                degrees = int(obj.get('degrees', 90))\n" +
         "                _matrix_orientation = (_matrix_orientation + degrees) % 360\n" +
         "                _render_matrix()\n" +
