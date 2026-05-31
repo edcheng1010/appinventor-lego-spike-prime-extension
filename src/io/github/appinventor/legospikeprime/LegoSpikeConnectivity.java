@@ -37,7 +37,8 @@ import java.util.TimerTask;
 @DesignerComponent(version = 2,
     description = "Manages BLE connection to a LEGO SPIKE Prime hub. "
         + "Set BluetoothDevice, call StartScanning, then ConnectToHub. "
-        + "HubConnected fires when the hub is ready.",
+        + "HubConnected fires when the hub is ready — its parameters include "
+        + "deviceType, sspVersion, availablePorts, and supportedEncodings.",
     category = ComponentCategory.EXTENSION,
     nonVisible = true,
     iconName = "aiwebres/legospike.png")
@@ -1473,51 +1474,21 @@ public class LegoSpikeConnectivity extends AndroidNonvisibleComponent {
     public String ConnectedDeviceAddress() { return connectedDeviceAddress; }
 
     // =========================================================================
-    // SSP capability queries (available inside HubConnected and after)
-    // =========================================================================
-
-    @SimpleFunction(description =
-        "Returns the hardware type string reported by the hub (e.g. 'spike-prime'). "
-        + "Call inside or after HubConnected.")
-    public String GetDeviceType() {
-        String t = capabilityStore.getDeviceType();
-        return t != null ? t : "";
-    }
-
-    @SimpleFunction(description =
-        "Returns a comma-separated list of all port IDs declared by the hub "
-        + "(e.g. 'A,B,display,status,imu,speaker'). Call inside or after HubConnected.")
-    public String GetAvailablePorts() {
-        java.util.List<String> ids = capabilityStore.getPortIds();
-        if (ids.isEmpty()) return "";
-        StringBuilder sb = new StringBuilder();
-        for (int i = 0; i < ids.size(); i++) {
-            if (i > 0) sb.append(',');
-            sb.append(ids.get(i));
-        }
-        return sb.toString();
-    }
-
-    @SimpleFunction(description =
-        "Returns a comma-separated list of payload encodings supported by the hub "
-        + "(e.g. 'json-utf8-newline'). Call inside or after HubConnected.")
-    public String GetSupportedEncodings() {
-        java.util.List<String> enc = capabilityStore.getEncodings();
-        if (enc.isEmpty()) return "";
-        StringBuilder sb = new StringBuilder();
-        for (int i = 0; i < enc.size(); i++) {
-            if (i > 0) sb.append(',');
-            sb.append(enc.get(i));
-        }
-        return sb.toString();
-    }
-
-    @SimpleFunction(description =
-        "Returns the SSP version string reported by the hub (e.g. '0.6'). "
-        + "Call inside or after HubConnected.")
-    public String GetSSPVersion() {
-        String v = capabilityStore.getSspVersion();
-        return v != null ? v : "";
+    private String[] buildCapabilityArgs() {
+        String deviceType = capabilityStore.getDeviceType();
+        String sspVersion = capabilityStore.getSspVersion();
+        java.util.List<String> portIds = capabilityStore.getPortIds();
+        java.util.List<String> encodings = capabilityStore.getEncodings();
+        StringBuilder ports = new StringBuilder();
+        for (int i = 0; i < portIds.size(); i++) { if (i > 0) ports.append(','); ports.append(portIds.get(i)); }
+        StringBuilder encs = new StringBuilder();
+        for (int i = 0; i < encodings.size(); i++) { if (i > 0) encs.append(','); encs.append(encodings.get(i)); }
+        return new String[]{
+            deviceType != null ? deviceType : "",
+            sspVersion != null ? sspVersion : "",
+            ports.toString(),
+            encs.toString()
+        };
     }
 
     // =========================================================================
@@ -2155,10 +2126,17 @@ public class LegoSpikeConnectivity extends AndroidNonvisibleComponent {
                 newHubs, retainedHubs, lostHubs, allCurrentHubs));
     }
 
-    @SimpleEvent(description = "Fired when the hub is connected and ready to use")
-    public void HubConnected(String deviceName) {
-        logDebug("HubConnected: " + deviceName);
-        EventDispatcher.dispatchEvent(this, "HubConnected", deviceName);
+    @SimpleEvent(description =
+        "Fired when the hub is connected and ready to use. "
+        + "deviceName: hub BLE name. deviceType: hardware type (e.g. 'spike-prime'). "
+        + "sspVersion: protocol version (e.g. '0.8'). "
+        + "availablePorts: comma-separated port IDs (e.g. 'A,B,C,D,E,F,display,status,imu'). "
+        + "supportedEncodings: comma-separated encodings (e.g. 'json-utf8-newline').")
+    public void HubConnected(String deviceName, String deviceType, String sspVersion,
+                             String availablePorts, String supportedEncodings) {
+        logDebug("HubConnected: " + deviceName + " (" + deviceType + " SSP " + sspVersion + ")");
+        EventDispatcher.dispatchEvent(this, "HubConnected",
+            deviceName, deviceType, sspVersion, availablePorts, supportedEncodings);
     }
 
     @SimpleEvent(description =
@@ -2203,7 +2181,8 @@ public class LegoSpikeConnectivity extends AndroidNonvisibleComponent {
                     if (waitForCapability(4000)) {
                         logDebug("UploadController: fast path OK");
                         final String dn = connectedDeviceName;
-                        mainHandler.post(() -> HubConnected(dn));
+                        final String[] cap = buildCapabilityArgs();
+                        mainHandler.post(() -> HubConnected(dn, cap[0], cap[1], cap[2], cap[3]));
                         return;
                     }
                     logDebug("UploadController: fast path failed — doing full upload");
@@ -2260,7 +2239,8 @@ public class LegoSpikeConnectivity extends AndroidNonvisibleComponent {
                 waitForCapability(3000);
 
                 final String dn = connectedDeviceName;
-                mainHandler.post(() -> HubConnected(dn));
+                final String[] cap = buildCapabilityArgs();
+                mainHandler.post(() -> HubConnected(dn, cap[0], cap[1], cap[2], cap[3]));
 
             } catch (Exception e) {
                 logDebug("UploadController error: " + e);
