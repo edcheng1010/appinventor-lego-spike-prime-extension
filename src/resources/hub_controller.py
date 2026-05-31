@@ -92,6 +92,48 @@ _cached_volume = 50
 _motor_acceleration = {}
 _movement_acceleration = None
 
+# Light matrix display state — enables software brightness scaling and rotation.
+# _matrix_pixels[row][col], values 0-100 natural brightness (before scale).
+_matrix_pixels = [[0] * 5 for _ in range(5)]
+_matrix_brightness = 100   # global scale 0-100
+_matrix_orientation = 0    # degrees CW: 0, 90, 180, 270
+
+# Known 5x5 pixel patterns for predefined images (row-major, 0=off, 100=on).
+_IMAGE_PIXELS = {
+    'HEART':      [[0,100,0,100,0],[100,100,100,100,100],[100,100,100,100,100],[0,100,100,100,0],[0,0,100,0,0]],
+    'HEARTSMALL': [[0,0,0,0,0],[0,100,0,100,0],[0,100,100,100,0],[0,0,100,0,0],[0,0,0,0,0]],
+    'HAPPY':      [[0,0,0,0,0],[0,100,0,100,0],[0,0,0,0,0],[100,0,0,0,100],[0,100,100,100,0]],
+    'SMILE':      [[0,0,0,0,0],[0,0,0,0,0],[0,100,0,100,0],[100,0,0,0,100],[0,100,100,100,0]],
+    'SAD':        [[0,0,0,0,0],[0,100,0,100,0],[0,0,0,0,0],[0,100,100,100,0],[100,0,0,0,100]],
+    'CONFUSED':   [[0,0,0,0,0],[0,100,0,100,0],[0,0,0,0,0],[0,0,100,0,0],[0,100,0,0,0]],
+    'ANGRY':      [[100,0,0,0,100],[0,100,0,100,0],[0,0,0,0,0],[0,100,100,100,0],[100,0,100,0,100]],
+    'ASLEEP':     [[0,0,0,0,0],[100,100,0,100,100],[0,0,0,0,0],[0,100,100,100,0],[0,0,0,0,0]],
+    'SURPRISED':  [[0,100,0,100,0],[0,0,0,0,0],[0,0,100,0,0],[0,100,0,100,0],[0,0,100,0,0]],
+    'YES':        [[0,0,0,0,0],[0,0,0,0,100],[0,0,0,100,0],[100,0,100,0,0],[0,100,0,0,0]],
+    'NO':         [[100,0,0,0,100],[0,100,0,100,0],[0,0,100,0,0],[0,100,0,100,0],[100,0,0,0,100]],
+    'ARROWNORTH': [[0,0,100,0,0],[0,100,100,100,0],[100,0,100,0,100],[0,0,100,0,0],[0,0,100,0,0]],
+    'ARROWEAST':  [[0,0,100,0,0],[0,0,0,100,0],[100,100,100,100,100],[0,0,0,100,0],[0,0,100,0,0]],
+    'ARROWSOUTH': [[0,0,100,0,0],[0,0,100,0,0],[100,0,100,0,100],[0,100,100,100,0],[0,0,100,0,0]],
+    'ARROWWEST':  [[0,0,100,0,0],[0,100,0,0,0],[100,100,100,100,100],[0,100,0,0,0],[0,0,100,0,0]],
+}
+
+
+def _render_matrix():
+    """Redraw all 25 pixels applying brightness scale and orientation transform."""
+    for row in range(5):
+        for col in range(5):
+            o = _matrix_orientation
+            if o == 90:
+                px, py = 4 - row, col
+            elif o == 180:
+                px, py = 4 - col, 4 - row
+            elif o == 270:
+                px, py = row, 4 - col
+            else:
+                px, py = col, row
+            scaled = int(_matrix_pixels[row][col] * _matrix_brightness / 100)
+            light_matrix.set_pixel(px, py, scaled)
+
 # ---------------------------------------------------------------------------
 # Tunnel setup
 # ---------------------------------------------------------------------------
@@ -153,7 +195,14 @@ def _ensure_pair(lp, rp):
 
 
 def _show_image(name):
+    global _matrix_pixels
     n = name.upper()
+    if n in _IMAGE_PIXELS:
+        # Use our pixel map — supports brightness scaling and rotation.
+        _matrix_pixels = [row[:] for row in _IMAGE_PIXELS[n]]
+        _render_matrix()
+        return
+    # Fallback: let firmware render (brightness/rotation won't apply).
     const = _IMG_CONST.get(n)
     if const is not None:
         try:
@@ -656,13 +705,15 @@ def _handle_led(cmd, obj, req_id):
                 except Exception:
                     pass
     elif len(parts) >= 3 and parts[1] == 'matrix':
-        action = parts[2]  # pixel, image, text, clear, brightness, orientation
+        action = parts[2]  # pixel, image, text, clear, brightness, orientation, rotate
         try:
             if action == 'pixel':
                 x = int(obj.get('x', 0))
                 y = int(obj.get('y', 0))
                 brightness = int(obj.get('brightness', 100))
-                light_matrix.set_pixel(x, y, brightness)
+                _matrix_pixels[y][x] = max(0, min(100, brightness))
+                scaled = int(_matrix_pixels[y][x] * _matrix_brightness / 100)
+                light_matrix.set_pixel(x, y, scaled)
 
             elif action == 'image':
                 _show_image(str(obj.get('image', 'HAPPY')))
@@ -672,20 +723,25 @@ def _handle_led(cmd, obj, req_id):
                 light_matrix.write(text)
 
             elif action == 'clear':
-                for _x in range(5):
-                    for _y in range(5):
-                        light_matrix.set_pixel(_x, _y, 0)
+                global _matrix_pixels
+                _matrix_pixels = [[0] * 5 for _ in range(5)]
+                _render_matrix()
 
             elif action == 'brightness':
-                # No global brightness API; scale future pixel writes instead
-                pass
+                global _matrix_brightness
+                _matrix_brightness = max(0, min(100, int(obj.get('level', 100))))
+                _render_matrix()
 
             elif action == 'orientation':
-                rotation = int(obj.get('rotation', 0))
-                try:
-                    hub.light_matrix.set_orientation(rotation)
-                except Exception:
-                    pass
+                global _matrix_orientation
+                _matrix_orientation = int(obj.get('rotation', 0)) % 360
+                _render_matrix()
+
+            elif action == 'rotate':
+                global _matrix_orientation
+                degrees = int(obj.get('degrees', 90))
+                _matrix_orientation = (_matrix_orientation + degrees) % 360
+                _render_matrix()
 
         except Exception as e:
             _send_error(301, 'LED error: ' + str(e), req_id)

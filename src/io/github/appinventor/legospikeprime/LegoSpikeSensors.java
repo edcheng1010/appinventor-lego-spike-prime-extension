@@ -601,6 +601,26 @@ public class LegoSpikeSensors extends AndroidNonvisibleComponent
         return color;
     }
 
+    @SimpleFunction(description =
+        "Light up the 4 indicator LEDs on a distance sensor accessory. "
+        + "Each value is brightness 0–100. port: the sensor port (A–F).")
+    public void LightUpDistanceSensor(@Options(Port.class) String port,
+                                      int topLeft, int topRight,
+                                      int bottomLeft, int bottomRight) {
+        if (!checkConnected()) return;
+        String dp = port.toUpperCase() + "_display";
+        int[][] pixels = {{topLeft, topRight}, {bottomLeft, bottomRight}};
+        for (int y = 0; y < 2; y++) {
+            for (int x = 0; x < 2; x++) {
+                connectivity.sendSSP(new SSPMessage("led.matrix.pixel")
+                    .withPort(dp)
+                    .withParam("x", x)
+                    .withParam("y", y)
+                    .withParam("brightness", Math.max(0, Math.min(100, pixels[y][x]))));
+            }
+        }
+    }
+
     // =========================================================================
     // Helpers
     // =========================================================================

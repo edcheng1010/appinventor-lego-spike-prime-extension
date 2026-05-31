@@ -140,18 +140,22 @@ public class LegoSpikeLight extends AndroidNonvisibleComponent {
     }
 
     @SimpleFunction(description =
-        "Rotate the light matrix display. rotation: 0, 90, 180, or 270 degrees.")
-    public void RotateLightMatrix(int rotation) {
+        "Rotate the light matrix display by the given amount. "
+        + "degrees: 90, 180, or 270 — added to the current orientation.")
+    public void RotateLightMatrix(int degrees) {
+        if (!checkConnected()) return;
+        connectivity.sendSSP(new SSPMessage("led.matrix.rotate")
+            .withPort("display")
+            .withParam("degrees", degrees));
+    }
+
+    @SimpleFunction(description =
+        "Set the absolute orientation of the light matrix display. rotation: 0, 90, 180, or 270.")
+    public void SetLightMatrixOrientation(int rotation) {
         if (!checkConnected()) return;
         connectivity.sendSSP(new SSPMessage("led.matrix.orientation")
             .withPort("display")
             .withParam("rotation", rotation));
-    }
-
-    @SimpleFunction(description =
-        "Set the orientation of the light matrix display. rotation: 0, 90, 180, or 270.")
-    public void SetLightMatrixOrientation(int rotation) {
-        RotateLightMatrix(rotation);
     }
 
     @SimpleFunction(description =
@@ -163,26 +167,6 @@ public class LegoSpikeLight extends AndroidNonvisibleComponent {
         connectivity.sendSSP(new SSPMessage("led.set")
             .withPort("status")
             .withParam("color", color.toLowerCase()));
-    }
-
-    @SimpleFunction(description =
-        "Light up the 4 indicator LEDs on a distance sensor. "
-        + "Each value is brightness 0–100. portId: the sensor port (A–F).")
-    public void LightUpDistanceSensor(String portId, int topLeft, int topRight,
-                                      int bottomLeft, int bottomRight) {
-        if (!checkConnected()) return;
-        // Distance sensor display port: 2x2 grayscale, addressed as (0,0)..(1,1)
-        String dp = portId.toUpperCase() + "_display";
-        int[][] pixels = {{topLeft, topRight}, {bottomLeft, bottomRight}};
-        for (int y = 0; y < 2; y++) {
-            for (int x = 0; x < 2; x++) {
-                connectivity.sendSSP(new SSPMessage("led.matrix.pixel")
-                    .withPort(dp)
-                    .withParam("x", x)
-                    .withParam("y", y)
-                    .withParam("brightness", Math.max(0, Math.min(100, pixels[y][x]))));
-            }
-        }
     }
 
     // =========================================================================

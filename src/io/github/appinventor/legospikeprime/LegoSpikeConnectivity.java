@@ -173,6 +173,48 @@ public class LegoSpikeConnectivity extends AndroidNonvisibleComponent {
         "_motor_acceleration = {}\n" +
         "_movement_acceleration = None\n" +
         "\n" +
+        "# Light matrix display state — enables software brightness scaling and rotation.\n" +
+        "# _matrix_pixels[row][col], values 0-100 natural brightness (before scale).\n" +
+        "_matrix_pixels = [[0] * 5 for _ in range(5)]\n" +
+        "_matrix_brightness = 100   # global scale 0-100\n" +
+        "_matrix_orientation = 0    # degrees CW: 0, 90, 180, 270\n" +
+        "\n" +
+        "# Known 5x5 pixel patterns for predefined images (row-major, 0=off, 100=on).\n" +
+        "_IMAGE_PIXELS = {\n" +
+        "    'HEART':      [[0,100,0,100,0],[100,100,100,100,100],[100,100,100,100,100],[0,100,100,100,0],[0,0,100,0,0]],\n" +
+        "    'HEARTSMALL': [[0,0,0,0,0],[0,100,0,100,0],[0,100,100,100,0],[0,0,100,0,0],[0,0,0,0,0]],\n" +
+        "    'HAPPY':      [[0,0,0,0,0],[0,100,0,100,0],[0,0,0,0,0],[100,0,0,0,100],[0,100,100,100,0]],\n" +
+        "    'SMILE':      [[0,0,0,0,0],[0,0,0,0,0],[0,100,0,100,0],[100,0,0,0,100],[0,100,100,100,0]],\n" +
+        "    'SAD':        [[0,0,0,0,0],[0,100,0,100,0],[0,0,0,0,0],[0,100,100,100,0],[100,0,0,0,100]],\n" +
+        "    'CONFUSED':   [[0,0,0,0,0],[0,100,0,100,0],[0,0,0,0,0],[0,0,100,0,0],[0,100,0,0,0]],\n" +
+        "    'ANGRY':      [[100,0,0,0,100],[0,100,0,100,0],[0,0,0,0,0],[0,100,100,100,0],[100,0,100,0,100]],\n" +
+        "    'ASLEEP':     [[0,0,0,0,0],[100,100,0,100,100],[0,0,0,0,0],[0,100,100,100,0],[0,0,0,0,0]],\n" +
+        "    'SURPRISED':  [[0,100,0,100,0],[0,0,0,0,0],[0,0,100,0,0],[0,100,0,100,0],[0,0,100,0,0]],\n" +
+        "    'YES':        [[0,0,0,0,0],[0,0,0,0,100],[0,0,0,100,0],[100,0,100,0,0],[0,100,0,0,0]],\n" +
+        "    'NO':         [[100,0,0,0,100],[0,100,0,100,0],[0,0,100,0,0],[0,100,0,100,0],[100,0,0,0,100]],\n" +
+        "    'ARROWNORTH': [[0,0,100,0,0],[0,100,100,100,0],[100,0,100,0,100],[0,0,100,0,0],[0,0,100,0,0]],\n" +
+        "    'ARROWEAST':  [[0,0,100,0,0],[0,0,0,100,0],[100,100,100,100,100],[0,0,0,100,0],[0,0,100,0,0]],\n" +
+        "    'ARROWSOUTH': [[0,0,100,0,0],[0,0,100,0,0],[100,0,100,0,100],[0,100,100,100,0],[0,0,100,0,0]],\n" +
+        "    'ARROWWEST':  [[0,0,100,0,0],[0,100,0,0,0],[100,100,100,100,100],[0,100,0,0,0],[0,0,100,0,0]],\n" +
+        "}\n" +
+        "\n" +
+        "\n" +
+        "def _render_matrix():\n" +
+        "    \"\"\"Redraw all 25 pixels applying brightness scale and orientation transform.\"\"\"\n" +
+        "    for row in range(5):\n" +
+        "        for col in range(5):\n" +
+        "            o = _matrix_orientation\n" +
+        "            if o == 90:\n" +
+        "                px, py = 4 - row, col\n" +
+        "            elif o == 180:\n" +
+        "                px, py = 4 - col, 4 - row\n" +
+        "            elif o == 270:\n" +
+        "                px, py = row, 4 - col\n" +
+        "            else:\n" +
+        "                px, py = col, row\n" +
+        "            scaled = int(_matrix_pixels[row][col] * _matrix_brightness / 100)\n" +
+        "            light_matrix.set_pixel(px, py, scaled)\n" +
+        "\n" +
         "# ---------------------------------------------------------------------------\n" +
         "# Tunnel setup\n" +
         "# ---------------------------------------------------------------------------\n" +
@@ -234,7 +276,14 @@ public class LegoSpikeConnectivity extends AndroidNonvisibleComponent {
         "\n" +
         "\n" +
         "def _show_image(name):\n" +
+        "    global _matrix_pixels\n" +
         "    n = name.upper()\n" +
+        "    if n in _IMAGE_PIXELS:\n" +
+        "        # Use our pixel map — supports brightness scaling and rotation.\n" +
+        "        _matrix_pixels = [row[:] for row in _IMAGE_PIXELS[n]]\n" +
+        "        _render_matrix()\n" +
+        "        return\n" +
+        "    # Fallback: let firmware render (brightness/rotation won't apply).\n" +
         "    const = _IMG_CONST.get(n)\n" +
         "    if const is not None:\n" +
         "        try:\n" +
@@ -737,13 +786,15 @@ public class LegoSpikeConnectivity extends AndroidNonvisibleComponent {
         "                except Exception:\n" +
         "                    pass\n" +
         "    elif len(parts) >= 3 and parts[1] == 'matrix':\n" +
-        "        action = parts[2]  # pixel, image, text, clear, brightness, orientation\n" +
+        "        action = parts[2]  # pixel, image, text, clear, brightness, orientation, rotate\n" +
         "        try:\n" +
         "            if action == 'pixel':\n" +
         "                x = int(obj.get('x', 0))\n" +
         "                y = int(obj.get('y', 0))\n" +
         "                brightness = int(obj.get('brightness', 100))\n" +
-        "                light_matrix.set_pixel(x, y, brightness)\n" +
+        "                _matrix_pixels[y][x] = max(0, min(100, brightness))\n" +
+        "                scaled = int(_matrix_pixels[y][x] * _matrix_brightness / 100)\n" +
+        "                light_matrix.set_pixel(x, y, scaled)\n" +
         "\n" +
         "            elif action == 'image':\n" +
         "                _show_image(str(obj.get('image', 'HAPPY')))\n" +
@@ -753,20 +804,25 @@ public class LegoSpikeConnectivity extends AndroidNonvisibleComponent {
         "                light_matrix.write(text)\n" +
         "\n" +
         "            elif action == 'clear':\n" +
-        "                for _x in range(5):\n" +
-        "                    for _y in range(5):\n" +
-        "                        light_matrix.set_pixel(_x, _y, 0)\n" +
+        "                global _matrix_pixels\n" +
+        "                _matrix_pixels = [[0] * 5 for _ in range(5)]\n" +
+        "                _render_matrix()\n" +
         "\n" +
         "            elif action == 'brightness':\n" +
-        "                # No global brightness API; scale future pixel writes instead\n" +
-        "                pass\n" +
+        "                global _matrix_brightness\n" +
+        "                _matrix_brightness = max(0, min(100, int(obj.get('level', 100))))\n" +
+        "                _render_matrix()\n" +
         "\n" +
         "            elif action == 'orientation':\n" +
-        "                rotation = int(obj.get('rotation', 0))\n" +
-        "                try:\n" +
-        "                    hub.light_matrix.set_orientation(rotation)\n" +
-        "                except Exception:\n" +
-        "                    pass\n" +
+        "                global _matrix_orientation\n" +
+        "                _matrix_orientation = int(obj.get('rotation', 0)) % 360\n" +
+        "                _render_matrix()\n" +
+        "\n" +
+        "            elif action == 'rotate':\n" +
+        "                global _matrix_orientation\n" +
+        "                degrees = int(obj.get('degrees', 90))\n" +
+        "                _matrix_orientation = (_matrix_orientation + degrees) % 360\n" +
+        "                _render_matrix()\n" +
         "\n" +
         "        except Exception as e:\n" +
         "            _send_error(301, 'LED error: ' + str(e), req_id)\n" +
