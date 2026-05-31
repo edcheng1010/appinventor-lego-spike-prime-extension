@@ -1208,7 +1208,6 @@ public class LegoSpikeConnectivity extends AndroidNonvisibleComponent {
             capabilityStore.load(cap);
             final String device  = cap.optString("device",      "");
             final String version = cap.optString("ssp_version", "");
-            mainHandler.post(() -> OnCapabilityReceived(device, version));
             startHeartbeat();
         }
         @Override public void onSensor(String port, String type, Object value) {
@@ -1249,7 +1248,7 @@ public class LegoSpikeConnectivity extends AndroidNonvisibleComponent {
                 // Detect timer suspension (Android backgrounding throttles Java Timers).
                 // If the previous tick was way later than expected, the app was likely
                 // backgrounded — assume hub is still alive, reset state, send fresh ping
-                // and re-evaluate next cycle. Avoids false OnHeartbeatLost on foreground.
+                // and re-evaluate next cycle. Avoids false heartbeat_lost on foreground.
                 if (tickGap > HEARTBEAT_INTERVAL_MS * 2) {
                     logDebug("Heartbeat: timer gap " + tickGap + "ms — backgrounded?, resetting");
                     lastPongMs = n;
@@ -1261,7 +1260,7 @@ public class LegoSpikeConnectivity extends AndroidNonvisibleComponent {
                 if (since > PONG_TIMEOUT_MS) {
                     cancel();           // stop this TimerTask from firing again
                     heartbeatTimer = null;
-                    mainHandler.post(() -> OnHeartbeatLost());
+                    mainHandler.post(() -> HubDisconnected("heartbeat_lost"));
                     return;
                 }
                 sendSSP(new SSPMessage("system.ping"));
@@ -1474,12 +1473,12 @@ public class LegoSpikeConnectivity extends AndroidNonvisibleComponent {
     public String ConnectedDeviceAddress() { return connectedDeviceAddress; }
 
     // =========================================================================
-    // SSP capability queries (populated after OnCapabilityReceived fires)
+    // SSP capability queries (available inside HubConnected and after)
     // =========================================================================
 
     @SimpleFunction(description =
-        "Returns the hardware type string reported by the hub in its capability "
-        + "declaration (e.g. 'spike-prime'). Empty before OnCapabilityReceived fires.")
+        "Returns the hardware type string reported by the hub (e.g. 'spike-prime'). "
+        + "Call inside or after HubConnected.")
     public String GetDeviceType() {
         String t = capabilityStore.getDeviceType();
         return t != null ? t : "";
@@ -1487,7 +1486,7 @@ public class LegoSpikeConnectivity extends AndroidNonvisibleComponent {
 
     @SimpleFunction(description =
         "Returns a comma-separated list of all port IDs declared by the hub "
-        + "(e.g. 'A,B,display,status,imu,speaker'). Empty before OnCapabilityReceived fires.")
+        + "(e.g. 'A,B,display,status,imu,speaker'). Call inside or after HubConnected.")
     public String GetAvailablePorts() {
         java.util.List<String> ids = capabilityStore.getPortIds();
         if (ids.isEmpty()) return "";
@@ -1501,7 +1500,7 @@ public class LegoSpikeConnectivity extends AndroidNonvisibleComponent {
 
     @SimpleFunction(description =
         "Returns a comma-separated list of payload encodings supported by the hub "
-        + "(e.g. 'json-utf8-newline'). Empty before OnCapabilityReceived fires.")
+        + "(e.g. 'json-utf8-newline'). Call inside or after HubConnected.")
     public String GetSupportedEncodings() {
         java.util.List<String> enc = capabilityStore.getEncodings();
         if (enc.isEmpty()) return "";
@@ -1515,7 +1514,7 @@ public class LegoSpikeConnectivity extends AndroidNonvisibleComponent {
 
     @SimpleFunction(description =
         "Returns the SSP version string reported by the hub (e.g. '0.6'). "
-        + "Empty before OnCapabilityReceived fires.")
+        + "Call inside or after HubConnected.")
     public String GetSSPVersion() {
         String v = capabilityStore.getSspVersion();
         return v != null ? v : "";
@@ -2124,7 +2123,7 @@ public class LegoSpikeConnectivity extends AndroidNonvisibleComponent {
             ScanningStarted();
         }
 
-        mainHandler.post(() -> HubDisconnected());
+        mainHandler.post(() -> HubDisconnected("disconnected"));
     }
 
     // =========================================================================
@@ -2162,11 +2161,13 @@ public class LegoSpikeConnectivity extends AndroidNonvisibleComponent {
         EventDispatcher.dispatchEvent(this, "HubConnected", deviceName);
     }
 
-    @SimpleEvent(description = "Fired when the connection to the hub is lost")
-    public void HubDisconnected() {
-        logDebug("HubDisconnected");
+    @SimpleEvent(description =
+        "Fired when the connection to the hub is lost. "
+        + "reason: 'disconnected' (clean) or 'heartbeat_lost' (silent drop — hub program crashed or BLE dropped).")
+    public void HubDisconnected(String reason) {
+        logDebug("HubDisconnected: " + reason);
         stopHeartbeat();
-        EventDispatcher.dispatchEvent(this, "HubDisconnected");
+        EventDispatcher.dispatchEvent(this, "HubDisconnected", reason);
     }
 
     @SimpleEvent(description = "Fired when an error occurs")
@@ -2176,27 +2177,11 @@ public class LegoSpikeConnectivity extends AndroidNonvisibleComponent {
     }
 
     @SimpleEvent(description =
-        "Fired when the hub bridge sends its capability declaration after connection. "
-        + "deviceType: hardware name (e.g. 'spike-prime'). sspVersion: protocol version.")
-    public void OnCapabilityReceived(String deviceType, String sspVersion) {
-        logDebug("OnCapabilityReceived: " + deviceType + " SSP " + sspVersion);
-        EventDispatcher.dispatchEvent(this, "OnCapabilityReceived", deviceType, sspVersion);
-    }
-
-    @SimpleEvent(description =
         "Fired when the hub bridge reports an error. "
         + "code: SSP error code (200-499). message: description. requestId: echoed request id if set.")
     public void OnError(int code, String message, String requestId) {
         logDebug("OnError " + code + ": " + message);
         EventDispatcher.dispatchEvent(this, "OnError", code, message, requestId);
-    }
-
-    @SimpleEvent(description =
-        "Fired when the hub bridge stops responding to heartbeat pings. "
-        + "The hub program may have crashed or the BLE connection silently dropped.")
-    public void OnHeartbeatLost() {
-        logDebug("OnHeartbeatLost");
-        EventDispatcher.dispatchEvent(this, "OnHeartbeatLost");
     }
 
     // =========================================================================
@@ -2270,6 +2255,9 @@ public class LegoSpikeConnectivity extends AndroidNonvisibleComponent {
 
                 // Cache hash so next reconnect can skip upload.
                 setCachedProgramHash(connectedDeviceAddress, PROGRAM_HASH);
+
+                // Wait for capability declaration before signalling ready.
+                waitForCapability(3000);
 
                 final String dn = connectedDeviceName;
                 mainHandler.post(() -> HubConnected(dn));
