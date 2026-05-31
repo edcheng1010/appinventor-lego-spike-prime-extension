@@ -50,6 +50,12 @@ public class LegoSpikeSensors extends AndroidNonvisibleComponent
     private String axis               = "Pitch";
     private long   timerStartMs       = System.currentTimeMillis();
 
+    // Accumulator for GetHubOrientation — assembles pitch+roll+yaw before firing HubOrientationRead.
+    private volatile boolean orientationReadPending = false;
+    private volatile Integer orientPitch = null;
+    private volatile Integer orientRoll  = null;
+    private volatile Integer orientYaw   = null;
+
     public LegoSpikeSensors(ComponentContainer container) {
         super(container.$form());
     }
@@ -129,7 +135,7 @@ public class LegoSpikeSensors extends AndroidNonvisibleComponent
     // Axis property
     // =========================================================================
     @SimpleProperty(category = PropertyCategory.BEHAVIOR,
-        description = "Hub tilt axis used by GetTiltAngle: Pitch, Roll, or Yaw")
+        description = "Hub tilt axis used by GetHubTiltAngle: Pitch, Roll, or Yaw")
     @DesignerProperty(
         editorType   = PropertyTypeConstants.PROPERTY_TYPE_CHOICES,
         editorArgs   = {"Pitch", "Roll", "Yaw"},
@@ -143,7 +149,7 @@ public class LegoSpikeSensors extends AndroidNonvisibleComponent
     }
 
     @SimpleProperty(category = PropertyCategory.BEHAVIOR,
-        description = "Hub tilt axis used by GetTiltAngle: Pitch, Roll, or Yaw")
+        description = "Hub tilt axis used by GetHubTiltAngle: Pitch, Roll, or Yaw")
     public String Axis() { return axis; }
 
     // =========================================================================
@@ -200,12 +206,12 @@ public class LegoSpikeSensors extends AndroidNonvisibleComponent
 
     /**
      * Request the hub tilt angle for the configured Axis.
-     * Fires TiltAngleRead(axis, degrees) when the hub responds.
+     * Fires HubTiltAngleRead(axis, degrees) when the hub responds.
      */
     @SimpleFunction(description =
         "Request the hub tilt angle for the configured Axis (Pitch, Roll, or Yaw). "
-        + "Fires TiltAngleRead when the hub responds.")
-    public void GetTiltAngle() {
+        + "Fires HubTiltAngleRead when the hub responds.")
+    public void GetHubTiltAngle() {
         sendSensorSSP(new SSPMessage("sensor.read")
             .withPort("imu").withParam("type", axis.toLowerCase()));
     }
@@ -264,8 +270,15 @@ public class LegoSpikeSensors extends AndroidNonvisibleComponent
     @SimpleEvent(description =
         "Fired when the hub reports a tilt angle. "
         + "axis: Pitch, Roll, or Yaw. degrees: angle in degrees.")
-    public void TiltAngleRead(String axis, int degrees) {
-        EventDispatcher.dispatchEvent(this, "TiltAngleRead", axis, degrees);
+    public void HubTiltAngleRead(String axis, int degrees) {
+        EventDispatcher.dispatchEvent(this, "HubTiltAngleRead", axis, degrees);
+    }
+
+    @SimpleEvent(description =
+        "Fired when GetHubOrientation responds with all three axes at once. "
+        + "pitch, roll, yaw: angles in degrees.")
+    public void HubOrientationRead(int pitch, int roll, int yaw) {
+        EventDispatcher.dispatchEvent(this, "HubOrientationRead", pitch, roll, yaw);
     }
 
     @SimpleEvent(description =
@@ -292,10 +305,9 @@ public class LegoSpikeSensors extends AndroidNonvisibleComponent
                     final String state   = obj.optString("value");
                     mainHandler.post(() -> {
                         if ("pressed".equals(state)) {
-                            WhenButtonPressed(btnName);
-                            if ("center".equals(btnName)) WhenHubButtonPressed();
+                            WhenHubButtonPressed(btnName);
                         } else if ("released".equals(state)) {
-                            WhenButtonReleased(btnName);
+                            WhenHubButtonReleased(btnName);
                         }
                     });
                 }
@@ -350,21 +362,33 @@ public class LegoSpikeSensors extends AndroidNonvisibleComponent
                         final int degrees = val instanceof Number
                             ? ((Number) val).intValue()
                             : Integer.parseInt(val.toString());
-                        mainHandler.post(() -> TiltAngleRead(titleAx, degrees));
+                        if (orientationReadPending) {
+                            if (type.equals("pitch"))      orientPitch = degrees;
+                            else if (type.equals("roll"))  orientRoll  = degrees;
+                            else                           orientYaw   = degrees;
+                            if (orientPitch != null && orientRoll != null && orientYaw != null) {
+                                orientationReadPending = false;
+                                final int p = orientPitch, r = orientRoll, y = orientYaw;
+                                orientPitch = null; orientRoll = null; orientYaw = null;
+                                mainHandler.post(() -> HubOrientationRead(p, r, y));
+                            }
+                        } else {
+                            mainHandler.post(() -> HubTiltAngleRead(titleAx, degrees));
+                        }
                     } catch (Exception ignored) {}
                     break;
                 }
                 case "face_orientation": {
                     final String fo = val != null ? val.toString() : "";
                     mainHandler.post(() -> {
-                        FaceOrientationRead(fo);
-                        FaceOrientationChanged(fo);
+                        HubFaceOrientationRead(fo);
+                        HubFaceOrientationChanged(fo);
                     });
                     break;
                 }
                 case "gesture": {
                     final String g = val != null ? val.toString() : "";
-                    mainHandler.post(() -> GestureDetected(g));
+                    mainHandler.post(() -> HubGestureDetected(g));
                     break;
                 }
                 case "acceleration": {
@@ -373,7 +397,7 @@ public class LegoSpikeSensors extends AndroidNonvisibleComponent
                         final double ax = acc.optDouble("x", 0);
                         final double ay = acc.optDouble("y", 0);
                         final double az = acc.optDouble("z", 0);
-                        mainHandler.post(() -> AccelerationRead(ax, ay, az));
+                        mainHandler.post(() -> HubAccelerationRead(ax, ay, az));
                     } catch (Exception ignored) {}
                     break;
                 }
@@ -383,7 +407,7 @@ public class LegoSpikeSensors extends AndroidNonvisibleComponent
                         final double vx = av.optDouble("x", 0);
                         final double vy = av.optDouble("y", 0);
                         final double vz = av.optDouble("z", 0);
-                        mainHandler.post(() -> AngularVelocityRead(vx, vy, vz));
+                        mainHandler.post(() -> HubAngularVelocityRead(vx, vy, vz));
                     } catch (Exception ignored) {}
                     break;
                 }
@@ -417,22 +441,25 @@ public class LegoSpikeSensors extends AndroidNonvisibleComponent
     // =========================================================================
 
     @SimpleFunction(description =
-        "Request hub acceleration on all axes. Fires AccelerationRead when the hub responds.")
+        "Request hub acceleration on all axes. Fires HubAccelerationRead when the hub responds.")
     public void GetHubAcceleration() {
         sendSensorSSP(new SSPMessage("sensor.read")
             .withPort("imu").withParam("type", "acceleration"));
     }
 
     @SimpleFunction(description =
-        "Request hub angular velocity on all axes. Fires AngularVelocityRead when received.")
+        "Request hub angular velocity on all axes. Fires HubAngularVelocityRead when received.")
     public void GetHubAngularVelocity() {
         sendSensorSSP(new SSPMessage("sensor.read")
             .withPort("imu").withParam("type", "angular_velocity"));
     }
 
     @SimpleFunction(description =
-        "Request all three tilt angles at once. Fires OrientationRead when the hub responds.")
+        "Request all three tilt angles at once. Fires HubOrientationRead(pitch, roll, yaw) "
+        + "once all three responses arrive.")
     public void GetHubOrientation() {
+        orientPitch = null; orientRoll = null; orientYaw = null;
+        orientationReadPending = true;
         sendSensorSSP(new SSPMessage("sensor.read")
             .withPort("imu").withParam("type", "pitch"));
         sendSensorSSP(new SSPMessage("sensor.read")
@@ -442,34 +469,35 @@ public class LegoSpikeSensors extends AndroidNonvisibleComponent
     }
 
     @SimpleFunction(description =
-        "Request which face of the hub is currently up. Fires FaceOrientationRead when received.")
+        "Request which face of the hub is currently up. Fires HubFaceOrientationRead when received.")
     public void GetHubFaceOrientation() {
         sendSensorSSP(new SSPMessage("sensor.read")
             .withPort("imu").withParam("type", "face_orientation"));
     }
 
     @SimpleFunction(description = "Reset the hub yaw angle to zero.")
-    public void ResetYaw() {
+    public void ResetHubYaw() {
         if (!checkConnected()) return;
         connectivity.sendSSP(new SSPMessage("orientation.reset_yaw"));
     }
 
     @SimpleFunction(description = "Set the hub yaw to a specific angle in degrees.")
-    public void SetYaw(int degrees) {
+    public void SetHubYaw(int degrees) {
         if (!checkConnected()) return;
         connectivity.sendSSP(new SSPMessage("orientation.set_yaw").withParam("angle", degrees));
     }
 
     @SimpleFunction(description =
-        "Configure which face of the hub is 'up' for orientation readings. "
-        + "face: face_up, face_down, port_a_up, port_a_down, port_e_up, port_e_down.")
-    public void SetHubSensorOrientation(String face) {
+        "Configure which face of the hub is 'up' for orientation readings.")
+    public void SetHubOrientation(@Options(HubFace.class) String face) {
         if (!checkConnected()) return;
-        connectivity.sendSSP(new SSPMessage("orientation.set_reference").withParam("face", face));
+        HubFace f = HubFace.fromUnderlyingValue(face);
+        String name = f != null ? f.toUnderlyingValue() : "face_up";
+        connectivity.sendSSP(new SSPMessage("orientation.set_reference").withParam("face", name));
     }
 
     @SimpleFunction(description =
-        "Subscribe to left hub button events. WhenButtonPressed/WhenButtonReleased fire on change.")
+        "Subscribe to left hub button events. WhenHubButtonPressed/WhenHubButtonReleased fire on change.")
     public void SubscribeToLeftButton() {
         if (!checkConnected()) return;
         connectivity.sendSSP(new SSPMessage("system.subscribe")
@@ -477,7 +505,7 @@ public class LegoSpikeSensors extends AndroidNonvisibleComponent
     }
 
     @SimpleFunction(description =
-        "Subscribe to right hub button events. WhenButtonPressed/WhenButtonReleased fire on change.")
+        "Subscribe to right hub button events. WhenHubButtonPressed/WhenHubButtonReleased fire on change.")
     public void SubscribeToRightButton() {
         if (!checkConnected()) return;
         connectivity.sendSSP(new SSPMessage("system.subscribe")
@@ -485,7 +513,7 @@ public class LegoSpikeSensors extends AndroidNonvisibleComponent
     }
 
     @SimpleFunction(description =
-        "Subscribe to center hub button events. WhenButtonPressed/WhenButtonReleased fire on change.")
+        "Subscribe to center hub button events. WhenHubButtonPressed/WhenHubButtonReleased fire on change.")
     public void SubscribeToCenterButton() {
         if (!checkConnected()) return;
         connectivity.sendSSP(new SSPMessage("system.subscribe")
@@ -493,7 +521,7 @@ public class LegoSpikeSensors extends AndroidNonvisibleComponent
     }
 
     @SimpleFunction(description =
-        "Subscribe to gesture events. GestureDetected fires whenever the hub detects a gesture.")
+        "Subscribe to gesture events. HubGestureDetected fires on shake, tap, double_tap, fall, face_up, or face_down.")
     public void SubscribeToGestures() {
         if (!checkConnected()) return;
         connectivity.sendSSP(new SSPMessage("sensor.subscribe")
@@ -503,7 +531,7 @@ public class LegoSpikeSensors extends AndroidNonvisibleComponent
     }
 
     @SimpleFunction(description =
-        "Subscribe to face orientation changes. FaceOrientationChanged fires when the hub flips.")
+        "Subscribe to face orientation changes. HubFaceOrientationChanged fires when the hub flips.")
     public void SubscribeToFaceOrientation() {
         if (!checkConnected()) return;
         connectivity.sendSSP(new SSPMessage("sensor.subscribe")
@@ -532,33 +560,33 @@ public class LegoSpikeSensors extends AndroidNonvisibleComponent
     // =========================================================================
 
     @SimpleEvent(description = "Fired when GetHubAcceleration responds. Values in m/s².")
-    public void AccelerationRead(double x, double y, double z) {
-        EventDispatcher.dispatchEvent(this, "AccelerationRead", x, y, z);
+    public void HubAccelerationRead(double x, double y, double z) {
+        EventDispatcher.dispatchEvent(this, "HubAccelerationRead", x, y, z);
     }
 
     @SimpleEvent(description = "Fired when GetHubAngularVelocity responds. Values in deg/s.")
-    public void AngularVelocityRead(double x, double y, double z) {
-        EventDispatcher.dispatchEvent(this, "AngularVelocityRead", x, y, z);
+    public void HubAngularVelocityRead(double x, double y, double z) {
+        EventDispatcher.dispatchEvent(this, "HubAngularVelocityRead", x, y, z);
     }
 
     @SimpleEvent(description =
         "Fired when GetHubFaceOrientation responds. "
         + "orientation: face_up, face_down, port_a_up, port_a_down, port_e_up, port_e_down.")
-    public void FaceOrientationRead(String orientation) {
-        EventDispatcher.dispatchEvent(this, "FaceOrientationRead", orientation);
+    public void HubFaceOrientationRead(String orientation) {
+        EventDispatcher.dispatchEvent(this, "HubFaceOrientationRead", orientation);
     }
 
     @SimpleEvent(description =
         "Fired when the hub detects a gesture (after SubscribeToGestures). "
         + "gesture: shake, tap, double_tap, fall, face_up, face_down.")
-    public void GestureDetected(String gesture) {
-        EventDispatcher.dispatchEvent(this, "GestureDetected", gesture);
+    public void HubGestureDetected(String gesture) {
+        EventDispatcher.dispatchEvent(this, "HubGestureDetected", gesture);
     }
 
     @SimpleEvent(description =
         "Fired when the hub detects a face-orientation change (after SubscribeToFaceOrientation).")
-    public void FaceOrientationChanged(String orientation) {
-        EventDispatcher.dispatchEvent(this, "FaceOrientationChanged", orientation);
+    public void HubFaceOrientationChanged(String orientation) {
+        EventDispatcher.dispatchEvent(this, "HubFaceOrientationChanged", orientation);
     }
 
     @SimpleEvent(description =
@@ -575,19 +603,14 @@ public class LegoSpikeSensors extends AndroidNonvisibleComponent
 
     @SimpleEvent(description =
         "Fired when a hub button is pressed. button: 'left', 'right', or 'center'.")
-    public void WhenButtonPressed(String button) {
-        EventDispatcher.dispatchEvent(this, "WhenButtonPressed", button);
+    public void WhenHubButtonPressed(String button) {
+        EventDispatcher.dispatchEvent(this, "WhenHubButtonPressed", button);
     }
 
     @SimpleEvent(description =
         "Fired when a hub button is released. button: 'left', 'right', or 'center'.")
-    public void WhenButtonReleased(String button) {
-        EventDispatcher.dispatchEvent(this, "WhenButtonReleased", button);
-    }
-
-    @SimpleEvent(description = "Fired when the center button is pressed.")
-    public void WhenHubButtonPressed() {
-        EventDispatcher.dispatchEvent(this, "WhenHubButtonPressed");
+    public void WhenHubButtonReleased(String button) {
+        EventDispatcher.dispatchEvent(this, "WhenHubButtonReleased", button);
     }
 
     // =========================================================================

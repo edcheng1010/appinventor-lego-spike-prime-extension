@@ -110,6 +110,7 @@
         <include name="LightMatrixImage.java"/>
         <include name="SensorColor.java"/>
         <include name="TiltAxis.java"/>
+        <include name="HubFace.java"/>
       </fileset>
     </delete>
 
@@ -177,6 +178,7 @@
       <include name="LightMatrixImage.java"/>
       <include name="SensorColor.java"/>
       <include name="TiltAxis.java"/>
+      <include name="HubFace.java"/>
       <include name="DurationUnit.java"/>
       <include name="StopAction.java"/>
     </javac>
