@@ -32,7 +32,7 @@ import com.google.appinventor.components.runtime.EventDispatcher;
 @SimpleObject(external = true)
 @DesignerComponent(version = 4,
     description = "Reads sensors on a LEGO SPIKE Prime hub. "
-        + "Set ColorSensorPort, DistanceSensorPort, and PressureSensorPort independently "
+        + "Set ColorSensorPort, DistanceSensorPort, and ForceSensorPort independently "
         + "so different sensors can be read in parallel. Set Axis for hub tilt. "
         + "Set the Connectivity property to a LegoSpikeConnectivity component.",
     category = ComponentCategory.EXTENSION,
@@ -47,7 +47,7 @@ public class LegoSpikeSensors extends AndroidNonvisibleComponent
 
     private String colorSensorPort    = "C";
     private String distanceSensorPort = "D";
-    private String pressureSensorPort = "E";
+    private String forceSensorPort = "E";
 
     // Accumulator for GetHubOrientation — assembles pitch+roll+yaw before firing HubOrientationRead.
     private volatile boolean orientationReadPending = false;
@@ -116,19 +116,19 @@ public class LegoSpikeSensors extends AndroidNonvisibleComponent
     public String DistanceSensorPort() { return distanceSensorPort; }
 
     @SimpleProperty(category = PropertyCategory.BEHAVIOR,
-        description = "Port (A–F) where the force sensor is connected (used by GetPressure and IsPressed)")
+        description = "Port (A–F) where the force sensor is connected (used by GetForce and IsForceSensorPressed)")
     @DesignerProperty(
         editorType   = PropertyTypeConstants.PROPERTY_TYPE_CHOICES,
         editorArgs   = {"A", "B", "C", "D", "E", "F"},
         defaultValue = "E")
-    public void PressureSensorPort(@Options(Port.class) String value) {
+    public void ForceSensorPort(@Options(Port.class) String value) {
         if (value != null && value.toUpperCase().trim().matches("[A-F]"))
-            pressureSensorPort = value.toUpperCase().trim();
+            forceSensorPort = value.toUpperCase().trim();
     }
 
     @SimpleProperty(category = PropertyCategory.BEHAVIOR,
-        description = "Port (A–F) where the force sensor is connected (used by GetPressure and IsPressed)")
-    public String PressureSensorPort() { return pressureSensorPort; }
+        description = "Port (A–F) where the force sensor is connected (used by GetForce and IsForceSensorPressed)")
+    public String ForceSensorPort() { return forceSensorPort; }
 
     // =========================================================================
     // Sensor read functions
@@ -160,26 +160,26 @@ public class LegoSpikeSensors extends AndroidNonvisibleComponent
 
     /**
      * Request the force measured by the force sensor on the configured Port.
-     * Fires PressureRead(port, value) when the hub responds.
+     * Fires ForceRead(port, value) when the hub responds.
      */
     @SimpleFunction(description =
         "Request the force value from the force sensor on the configured Port. "
-        + "Fires PressureRead when the hub responds.")
-    public void GetPressure() {
+        + "Fires ForceRead when the hub responds.")
+    public void GetForce() {
         sendSensorSSP(new SSPMessage("sensor.read")
-            .withPort(pressureSensorPort).withParam("type", "force"));
+            .withPort(forceSensorPort).withParam("type", "force"));
     }
 
     /**
      * Request whether the force sensor on the configured Port is pressed.
-     * Fires PressureChecked(port, isPressed) when the hub responds.
+     * Fires ForceSensorPressed(port, isPressed) when the hub responds.
      */
     @SimpleFunction(description =
         "Ask whether the force sensor on the configured Port is pressed. "
-        + "Fires PressureChecked when the hub responds.")
-    public void IsPressed() {
+        + "Fires ForceSensorPressed when the hub responds.")
+    public void IsForceSensorPressed() {
         sendSensorSSP(new SSPMessage("sensor.read")
-            .withPort(pressureSensorPort).withParam("type", "touched"));
+            .withPort(forceSensorPort).withParam("type", "touched"));
     }
 
     /**
@@ -228,15 +228,15 @@ public class LegoSpikeSensors extends AndroidNonvisibleComponent
     }
 
     @SimpleEvent(description =
-        "Fired when the hub reports a force/pressure sensor reading (0–100).")
-    public void PressureRead(String port, int value) {
-        EventDispatcher.dispatchEvent(this, "PressureRead", port, value);
+        "Fired when the hub reports a force sensor reading (0–100).")
+    public void ForceRead(String port, int value) {
+        EventDispatcher.dispatchEvent(this, "ForceRead", port, value);
     }
 
     @SimpleEvent(description =
         "Fired when the hub reports whether the force sensor is pressed.")
-    public void PressureChecked(String port, boolean isPressed) {
-        EventDispatcher.dispatchEvent(this, "PressureChecked", port, isPressed);
+    public void ForceSensorPressed(String port, boolean isPressed) {
+        EventDispatcher.dispatchEvent(this, "ForceSensorPressed", port, isPressed);
     }
 
     @SimpleEvent(description =
@@ -316,7 +316,7 @@ public class LegoSpikeSensors extends AndroidNonvisibleComponent
                         final int value = val instanceof Number
                             ? ((Number) val).intValue()
                             : Integer.parseInt(val.toString());
-                        mainHandler.post(() -> PressureRead(port, value));
+                        mainHandler.post(() -> ForceRead(port, value));
                     } catch (Exception ignored) {}
                     break;
                 }
@@ -324,7 +324,7 @@ public class LegoSpikeSensors extends AndroidNonvisibleComponent
                     final boolean pressed = val instanceof Boolean
                         ? (Boolean) val
                         : "true".equalsIgnoreCase(val != null ? val.toString() : "");
-                    mainHandler.post(() -> PressureChecked(port, pressed));
+                    mainHandler.post(() -> ForceSensorPressed(port, pressed));
                     break;
                 }
                 case "pitch":
