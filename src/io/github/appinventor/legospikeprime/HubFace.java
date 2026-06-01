@@ -4,14 +4,19 @@ import com.google.appinventor.components.common.OptionList;
 import java.util.HashMap;
 import java.util.Map;
 
-/** Which face of the hub is 'up' — used by SetHubOrientation. */
+/**
+ * Which face of the hub is 'up' — used by SetHubOrientation.
+ * Matches LEGO SPIKE "Set Hub Sensor Orientation" block face names.
+ * Physical layout: Top=white/display, Bottom=yellow, Front=USB slot,
+ * Back=microphone, Left side=ports A/C/E, Right side=ports B/D/F.
+ */
 public enum HubFace implements OptionList<String> {
-  FaceUp("face_up"),
-  FaceDown("face_down"),
-  PortAUp("port_a_up"),
-  PortADown("port_a_down"),
-  PortEUp("port_e_up"),
-  PortEDown("port_e_down");
+  Top("Top"),
+  Front("Front"),
+  RightSide("Right side"),
+  Bottom("Bottom"),
+  Back("Back"),
+  LeftSide("Left side");
 
   private final String value;
   HubFace(String v) { this.value = v; }

@@ -91,7 +91,7 @@ public class LegoSpikeConnectivity extends AndroidNonvisibleComponent {
         "#\n" +
         "# See: https://github.com/edcheng1010/solaria-hub/blob/main/spec/SSP-v0.8.md\n" +
         "\n" +
-        "import hub, motor, motor_pair, time\n" +
+        "import hub, motor, motor_pair, time, math\n" +
         "from hub import light_matrix, port\n" +
         "\n" +
         "try:\n" +
@@ -161,10 +161,43 @@ public class LegoSpikeConnectivity extends AndroidNonvisibleComponent {
         "_timer_start = time.ticks_ms()\n" +
         "_mov_lp = None          # cached motor_pair left port (skip re-pair when same)\n" +
         "_mov_rp = None\n" +
-        "_yaw_offset = 0         # software yaw offset in decidegrees (for ResetHubYaw / SetHubYaw)\n" +
+        "# Orientation frame — body axes for each hub mounting face.\n" +
+        "# Body frame: +X=Left(A/C/E), +Y=Front(USB), +Z=Top(display)\n" +
+        "# Convention: pitch+ = ref face tilts forward; roll+ = left(A/C/E) up; yaw+ = CW\n" +
+        "_ORIENT_FRAMES = {\n" +
+        "    # Sensor coordinates: acc[0]=USB, acc[1]=A/C/E, acc[2]=Top\n" +
+        "    # pitch=atan2(af,au), roll=atan2(al,au), yaw integrated negated\n" +
+        "    'Top':        ( 0, 0, 1,   1, 0, 0,   0, 1, 0),\n" +
+        "    'Bottom':     ( 0, 0,-1,   1, 0, 0,   0,-1, 0),\n" +
+        "    'Front':      ( 1, 0, 0,   0, 0,-1,   0, 1, 0),\n" +
+        "    'Back':       (-1, 0, 0,   0, 0, 1,   0, 1, 0),\n" +
+        "    'Left side':  ( 0, 1, 0,   1, 0, 0,   0, 0,-1),\n" +
+        "    'Right side': ( 0,-1, 0,   1, 0, 0,   0, 0, 1),\n" +
+        "}\n" +
+        "_orient_u = (0, 0, 1)\n" +
+        "_orient_f = (1, 0, 0)\n" +
+        "_orient_l = (0, 1, 0)\n" +
+        "_yaw_acc  = 0.0\n" +
+        "_yaw_zero = 0.0\n" +
+        "# Complementary filter for pitch/roll. FALLBACK: set _CF_ALPHA=0.0 for pure accel.\n" +
+        "_cf_pitch   = 0.0\n" +
+        "_cf_roll    = 0.0\n" +
+        "_cf_last_ms = 0\n" +
+        "_CF_ALPHA   = 0.98\n" +
+        "\n" +
+        "# Map Python API orientation strings to LEGO face names.\n" +
+        "_FACE_NAME_MAP = {\n" +
+        "    'face_up':    'Top',\n" +
+        "    'face_down':  'Bottom',\n" +
+        "    'port_a_up':  'Left side',\n" +
+        "    'port_a_down': 'Right side',\n" +
+        "    'port_e_up':  'Front',\n" +
+        "    'port_e_down': 'Back',\n" +
+        "}\n" +
         "\n" +
         "# Gesture integer → SSP string name (SPIKE Prime 3.x constants)\n" +
         "_GESTURE_MAP = {0: 'tap', 1: 'double_tap', 2: 'shake', 3: 'fall'}\n" +
+        "_GESTURE_POLL_TICKS = 20  # 20x10ms=200ms window; reduce to 5 for faster loop\n" +
         "\n" +
         "# Subscriptions: port_id -> {type, mode, interval_ms, min_change, last_ms, last_val}\n" +
         "_subscriptions = {}\n" +
@@ -259,16 +292,45 @@ public class LegoSpikeConnectivity extends AndroidNonvisibleComponent {
         "    _send({'event': 'system', 'metric': metric, 'value': value})\n" +
         "\n" +
         "\n" +
-        "def _tilt_angles():\n" +
-        "    \"\"\"Returns (pitch, roll, yaw) in degrees (integer), or (0, 0, 0) on error.\"\"\"\n" +
+        "def _dot(a, b):\n" +
+        "    return a[0]*b[0] + a[1]*b[1] + a[2]*b[2]\n" +
+        "\n" +
+        "\n" +
+        "def _update_orientation(now):\n" +
+        "    # FALLBACK to pure accel: set _CF_ALPHA=0.0 (gyro disabled, pure accel each tick).\n" +
+        "    global _cf_pitch, _cf_roll, _cf_last_ms, _yaw_acc\n" +
         "    try:\n" +
-        "        try:\n" +
+        "        a = hub.motion_sensor.acceleration()\n" +
+        "        ax, ay, az = a[0], a[1], a[2]\n" +
+        "        w = hub.motion_sensor.angular_velocity()\n" +
+        "        wx, wy, wz = w[0] / 10.0, w[1] / 10.0, w[2] / 10.0\n" +
+        "        au = _dot(_orient_u, (ax, ay, az))\n" +
+        "        accel_pitch = math.degrees(math.atan2(_dot(_orient_f, (ax, ay, az)), au))\n" +
+        "        accel_roll  = math.degrees(math.atan2(_dot(_orient_l, (ax, ay, az)), au))\n" +
+        "        dt_ms = time.ticks_diff(now, _cf_last_ms) if _cf_last_ms else 0\n" +
+        "        _cf_last_ms = now\n" +
+        "        if 0 < dt_ms <= 500 and _CF_ALPHA > 0.0:\n" +
+        "            dt_s = dt_ms / 1000.0\n" +
+        "            _cf_pitch = _CF_ALPHA * (_cf_pitch - _dot(_orient_l, (wx,wy,wz)) * dt_s) + (1.0 - _CF_ALPHA) * accel_pitch\n" +
+        "            _cf_roll  = _CF_ALPHA * (_cf_roll  + _dot(_orient_f, (wx,wy,wz)) * dt_s) + (1.0 - _CF_ALPHA) * accel_roll\n" +
+        "        else:\n" +
+        "            _cf_pitch = accel_pitch\n" +
+        "            _cf_roll  = accel_roll\n" +
+        "        if abs(_orient_u[2]) > 0.5:\n" +
         "            raw = hub.motion_sensor.tilt_angles()\n" +
-        "        except AttributeError:\n" +
-        "            raw = hub.imu.tilt_angles()\n" +
-        "        return (raw[0] // 10, raw[1] // 10, (raw[2] - _yaw_offset) // 10)\n" +
+        "            _yaw_acc = -raw[0] / 10.0\n" +
+        "        elif 0 < dt_ms <= 500:\n" +
+        "            rate = -_dot(_orient_u, (wx, wy, wz))\n" +
+        "            if abs(rate) > 1.5:\n" +
+        "                _yaw_acc += rate * (dt_ms / 1000.0)\n" +
         "    except Exception:\n" +
-        "        return (0, 0, 0)\n" +
+        "        pass\n" +
+        "\n" +
+        "\n" +
+        "def _tilt_angles():\n" +
+        "    return (int(round(_cf_pitch)),\n" +
+        "            int(round(_cf_roll)),\n" +
+        "            int(round(_yaw_acc - _yaw_zero)))\n" +
         "\n" +
         "\n" +
         "def _ensure_pair(lp, rp):\n" +
@@ -304,22 +366,26 @@ public class LegoSpikeConnectivity extends AndroidNonvisibleComponent {
         "\n" +
         "\n" +
         "def _face_orientation():\n" +
-        "    \"\"\"Return discrete face orientation string from IMU (v0.7).\"\"\"\n" +
+        "    \"\"\"Return LEGO face name (Top/Bottom/Front/Back/Left side/Right side) from IMU.\"\"\"\n" +
         "    try:\n" +
-        "        # Try firmware API first\n" +
         "        try:\n" +
-        "            return hub.motion_sensor.get_orientation()\n" +
+        "            raw = hub.motion_sensor.get_orientation()\n" +
+        "            return _FACE_NAME_MAP.get(raw, raw)\n" +
         "        except AttributeError:\n" +
         "            pass\n" +
-        "        # Derive from pitch/roll angles (heuristic)\n" +
-        "        pitch, roll, _ = _tilt_angles()\n" +
-        "        if pitch > 60:   return 'port_e_up'\n" +
-        "        if pitch < -60:  return 'port_a_up'\n" +
-        "        if roll > 60:    return 'face_down'\n" +
-        "        if roll < -60:   return 'face_up'\n" +
-        "        return 'face_up'\n" +
+        "        try:\n" +
+        "            a = hub.motion_sensor.acceleration()\n" +
+        "            ax, ay, az = abs(a[0]), abs(a[1]), abs(a[2])\n" +
+        "            if az >= ax and az >= ay:\n" +
+        "                return 'Top' if a[2] > 0 else 'Bottom'\n" +
+        "            elif ax >= ay:\n" +
+        "                return 'Front' if a[0] > 0 else 'Back'\n" +
+        "            else:\n" +
+        "                return 'Left side' if a[1] > 0 else 'Right side'\n" +
+        "        except Exception:\n" +
+        "            return 'Top'\n" +
         "    except Exception:\n" +
-        "        return 'face_up'\n" +
+        "        return 'Top'\n" +
         "\n" +
         "\n" +
         "def _angular_velocity():\n" +
@@ -511,7 +577,7 @@ public class LegoSpikeConnectivity extends AndroidNonvisibleComponent {
         "        'constraints': {\n" +
         "            'gesture': {\n" +
         "                'type': 'enum',\n" +
-        "                'values': ['shake', 'tap', 'double_tap', 'fall', 'face_up', 'face_down'],\n" +
+        "                'values': ['shake', 'tap', 'double_tap', 'fall'],\n" +
         "            },\n" +
         "            'face_orientation': {\n" +
         "                'type': 'enum',\n" +
@@ -1015,33 +1081,40 @@ public class LegoSpikeConnectivity extends AndroidNonvisibleComponent {
         "\n" +
         "\n" +
         "def _handle_orientation(cmd, obj, req_id):\n" +
-        "    \"\"\"v0.7 orientation.* command category.\"\"\"\n" +
-        "    global _yaw_offset\n" +
-        "    action = cmd.split('.')[1]  # set_yaw, reset_yaw, set_reference\n" +
+        "    global _orient_u, _orient_f, _orient_l, _yaw_acc, _yaw_zero\n" +
+        "    global _cf_pitch, _cf_roll, _cf_last_ms\n" +
+        "    action = cmd.split('.')[1]\n" +
         "    try:\n" +
         "        if action == 'reset_yaw':\n" +
-        "            # Software offset: capture current raw yaw so relative yaw reads 0.\n" +
-        "            try:\n" +
-        "                _yaw_offset = hub.motion_sensor.tilt_angles()[2]\n" +
-        "            except Exception:\n" +
-        "                _yaw_offset = 0\n" +
-        "            try:\n" +
-        "                hub.motion_sensor.reset_yaw_angle()\n" +
-        "            except Exception:\n" +
-        "                pass\n" +
+        "            _yaw_zero = _yaw_acc\n" +
         "        elif action == 'set_yaw':\n" +
-        "            # Software offset: shift raw yaw so that reading equals requested angle.\n" +
         "            angle = int(obj.get('angle', 0))\n" +
-        "            try:\n" +
-        "                _yaw_offset = hub.motion_sensor.tilt_angles()[2] - angle * 10\n" +
-        "            except Exception:\n" +
-        "                _yaw_offset = -angle * 10\n" +
+        "            _yaw_zero = _yaw_acc - angle\n" +
         "        elif action == 'set_reference':\n" +
-        "            face = obj.get('face', 'face_up')\n" +
+        "            face = obj.get('face', 'Top')\n" +
+        "            f = _ORIENT_FRAMES.get(face, _ORIENT_FRAMES['Top'])\n" +
+        "            _orient_u = (f[0], f[1], f[2])\n" +
+        "            _orient_f = (f[3], f[4], f[5])\n" +
+        "            _orient_l = (f[6], f[7], f[8])\n" +
         "            try:\n" +
-        "                hub.motion_sensor.set_yaw_face(face)\n" +
-        "            except AttributeError:\n" +
-        "                pass  # not available on all FW versions\n" +
+        "                if abs(f[2]) > 0.5:\n" +
+        "                    raw = hub.motion_sensor.tilt_angles()\n" +
+        "                    _yaw_acc = -raw[0] / 10.0\n" +
+        "                else:\n" +
+        "                    _yaw_acc = 0.0\n" +
+        "            except Exception:\n" +
+        "                _yaw_acc = 0.0\n" +
+        "            _yaw_zero  = _yaw_acc\n" +
+        "            _cf_last_ms = 0\n" +
+        "            try:\n" +
+        "                a = hub.motion_sensor.acceleration()\n" +
+        "                ax, ay, az = a[0], a[1], a[2]\n" +
+        "                au = _dot(_orient_u, (ax, ay, az))\n" +
+        "                _cf_pitch = math.degrees(math.atan2(_dot(_orient_f, (ax, ay, az)), au))\n" +
+        "                _cf_roll  = math.degrees(math.atan2(_dot(_orient_l, (ax, ay, az)), au))\n" +
+        "            except Exception:\n" +
+        "                _cf_pitch = 0.0\n" +
+        "                _cf_roll  = 0.0\n" +
         "    except Exception as e:\n" +
         "        _send_error(301, 'Orientation error: ' + str(e), req_id)\n" +
         "\n" +
@@ -1120,10 +1193,12 @@ public class LegoSpikeConnectivity extends AndroidNonvisibleComponent {
         "\n" +
         "\n" +
         "def _run_loop():\n" +
-        "    \"\"\"Main polling loop — subscriptions and heartbeat.\"\"\"\n" +
         "    global _heartbeat_active\n" +
         "    while True:\n" +
         "        now = time.ticks_ms()\n" +
+        "\n" +
+        "        # Update pitch/roll (complementary filter) and yaw every tick.\n" +
+        "        _update_orientation(now)\n" +
         "\n" +
         "        # Heartbeat: stop emitting if client stops pinging for 10 s\n" +
         "        if _heartbeat_active and _last_ping_ms is not None:\n" +
@@ -1132,6 +1207,23 @@ public class LegoSpikeConnectivity extends AndroidNonvisibleComponent {
         "                _subscriptions.clear()\n" +
         "                _sys_subscriptions.clear()\n" +
         "\n" +
+        "        # Fast-poll gesture subscriptions: check every 10 ms for _GESTURE_POLL_TICKS ticks.\n" +
+        "        # 200 ms window catches shake and double_tap which need sustained/repeated motion.\n" +
+        "        for pid, sub in list(_subscriptions.items()):\n" +
+        "            if sub['type'] != 'gesture':\n" +
+        "                continue\n" +
+        "            for _ in range(_GESTURE_POLL_TICKS):\n" +
+        "                try:\n" +
+        "                    g = _GESTURE_MAP.get(hub.motion_sensor.gesture(), None)\n" +
+        "                except Exception:\n" +
+        "                    g = None\n" +
+        "                if g is not None:\n" +
+        "                    _sensor_event(pid, 'gesture', g)\n" +
+        "                    sub['last_val'] = None\n" +
+        "                    sub['last_ms'] = now\n" +
+        "                    break\n" +
+        "                time.sleep_ms(10)\n" +
+        "\n" +
         "        # Sensor subscriptions\n" +
         "        for pid, sub in list(_subscriptions.items()):\n" +
         "            elapsed = time.ticks_diff(now, sub['last_ms'])\n" +
@@ -1139,6 +1231,8 @@ public class LegoSpikeConnectivity extends AndroidNonvisibleComponent {
         "                continue\n" +
         "\n" +
         "            stype = sub['type']\n" +
+        "            if stype == 'gesture':\n" +
+        "                continue  # handled by fast-poll above\n" +
         "            val = _read_sensor_value(pid, stype)\n" +
         "\n" +
         "            if val is None:\n" +

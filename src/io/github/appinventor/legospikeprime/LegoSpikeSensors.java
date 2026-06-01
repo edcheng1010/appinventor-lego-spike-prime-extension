@@ -43,6 +43,7 @@ public class LegoSpikeSensors extends AndroidNonvisibleComponent
 
     private LegoSpikeConnectivity connectivity;
     private final Handler mainHandler = new Handler(Looper.getMainLooper());
+    private final java.util.concurrent.atomic.AtomicInteger readSeq = new java.util.concurrent.atomic.AtomicInteger(0);
 
     private String colorSensorPort    = "C";
     private String distanceSensorPort = "D";
@@ -474,7 +475,7 @@ public class LegoSpikeSensors extends AndroidNonvisibleComponent
     public void SetHubOrientation(@Options(HubFace.class) String face) {
         if (!checkConnected()) return;
         HubFace f = HubFace.fromUnderlyingValue(face);
-        String name = f != null ? f.toUnderlyingValue() : "face_up";
+        String name = f != null ? f.toUnderlyingValue() : "Top";
         connectivity.sendSSP(new SSPMessage("orientation.set_reference").withParam("face", name));
     }
 
@@ -503,7 +504,7 @@ public class LegoSpikeSensors extends AndroidNonvisibleComponent
     }
 
     @SimpleFunction(description =
-        "Subscribe to gesture events. HubGestureDetected fires on shake, tap, double_tap, fall, face_up, or face_down.")
+        "Subscribe to gesture events. HubGestureDetected fires on shake, tap, double_tap, or fall.")
     public void SubscribeToHubGestures() {
         if (!checkConnected()) return;
         connectivity.sendSSP(new SSPMessage("sensor.subscribe")
@@ -553,21 +554,21 @@ public class LegoSpikeSensors extends AndroidNonvisibleComponent
 
     @SimpleEvent(description =
         "Fired when GetHubFaceOrientation responds. "
-        + "faceOrientation: face_up, face_down, port_a_up, port_a_down, port_e_up, port_e_down.")
+        + "faceOrientation: Top, Bottom, Front, Back, Left side, Right side.")
     public void HubFaceOrientationRead(String faceOrientation) {
         EventDispatcher.dispatchEvent(this, "HubFaceOrientationRead", faceOrientation);
     }
 
     @SimpleEvent(description =
         "Fired when the hub detects a gesture (after SubscribeToHubGestures). "
-        + "gesture: shake, tap, double_tap, fall, face_up, face_down.")
+        + "gesture: shake, tap, double_tap, or fall.")
     public void HubGestureDetected(String gesture) {
         EventDispatcher.dispatchEvent(this, "HubGestureDetected", gesture);
     }
 
     @SimpleEvent(description =
         "Fired when the hub detects a face-orientation change (after SubscribeToHubFaceOrientation). "
-        + "faceOrientation: face_up, face_down, port_a_up, port_a_down, port_e_up, port_e_down.")
+        + "faceOrientation: Top, Bottom, Front, Back, Left side, Right side.")
     public void HubFaceOrientationChanged(String faceOrientation) {
         EventDispatcher.dispatchEvent(this, "HubFaceOrientationChanged", faceOrientation);
     }
@@ -632,7 +633,7 @@ public class LegoSpikeSensors extends AndroidNonvisibleComponent
     // =========================================================================
     private void sendSensorSSP(SSPMessage msg) {
         if (!checkConnected()) return;
-        connectivity.sendSSP(msg);
+        connectivity.sendSSP(msg.withRequestId("r" + readSeq.incrementAndGet()));
     }
 
     private boolean checkConnected() {

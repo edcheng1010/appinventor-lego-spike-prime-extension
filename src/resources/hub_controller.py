@@ -9,7 +9,7 @@
 #
 # See: https://github.com/edcheng1010/solaria-hub/blob/main/spec/SSP-v0.8.md
 
-import hub, motor, motor_pair, time
+import hub, motor, motor_pair, time, math
 from hub import light_matrix, port
 
 try:
@@ -79,10 +79,50 @@ _IMAGES_IDX = {
 _timer_start = time.ticks_ms()
 _mov_lp = None          # cached motor_pair left port (skip re-pair when same)
 _mov_rp = None
-_yaw_offset = 0         # software yaw offset in decidegrees (for ResetHubYaw / SetHubYaw)
+# Orientation frame — body axes for each hub mounting face.
+# Body frame (confirmed Top mode): +X=Left(A/C/E), +Y=Front(USB), +Z=Top(display)
+# Per face: u=up, f=forward, l=left unit vectors in body frame.
+# Pitch/roll derived from gravity vector; yaw from gyro integration about u-axis.
+# Convention: pitch+ = ref face tilts forward; roll+ = left(A/C/E) side tilts up; yaw+ = CW.
+_ORIENT_FRAMES = {
+    # Vectors in SENSOR coordinates: acc[0]=USB, acc[1]=A/C/E, acc[2]=Top
+    # (ux,uy,uz, fx,fy,fz, lx,ly,lz) where pitch=atan2(af,au), roll=atan2(al,au)
+    # pitch+ = reference face tilts forward; roll+ = A/C/E side tilts up; yaw+ = CW
+    'Top':        ( 0, 0, 1,   1, 0, 0,   0, 1, 0),
+    'Bottom':     ( 0, 0,-1,   1, 0, 0,   0,-1, 0),
+    'Front':      ( 1, 0, 0,   0, 0,-1,   0, 1, 0),
+    'Back':       (-1, 0, 0,   0, 0, 1,   0, 1, 0),
+    'Left side':  ( 0, 1, 0,   1, 0, 0,   0, 0,-1),
+    'Right side': ( 0,-1, 0,   1, 0, 0,   0, 0, 1),
+}
+_orient_u = (0, 0, 1)   # current up unit vector (sensor frame)
+_orient_f = (1, 0, 0)   # current forward unit vector (acc[0]=USB for pitch)
+_orient_l = (0, 1, 0)   # current left unit vector (acc[1]=A/C/E for roll)
+_yaw_acc  = 0.0         # current heading in degrees
+_yaw_zero = 0.0         # yaw zero offset in degrees (ResetHubYaw/SetHubYaw)
+# Complementary filter state for pitch/roll.
+# Combines gyro (short-term, fast) with accelerometer (long-term, drift-free).
+# FALLBACK to pure accelerometer: set _CF_ALPHA = 0.0 (pure accel EMA with _CF_ALPHA as weight).
+_cf_pitch   = 0.0       # complementary-filter pitch (degrees)
+_cf_roll    = 0.0       # complementary-filter roll (degrees)
+_cf_last_ms = 0         # timestamp of last orientation update tick
+_CF_ALPHA   = 0.98      # gyro weight (1-_CF_ALPHA=0.02 is accel correction weight)
+
+# Map Python API orientation strings to LEGO face names for HubFaceOrientationRead/Changed.
+_FACE_NAME_MAP = {
+    'face_up':    'Top',
+    'face_down':  'Bottom',
+    'port_a_up':  'Left side',    # Port A on left face; pitch axis
+    'port_a_down': 'Right side',
+    'port_e_up':  'Front',        # Port E end; roll axis
+    'port_e_down': 'Back',
+}
 
 # Gesture integer → SSP string name (SPIKE Prime 3.x constants)
 _GESTURE_MAP = {0: 'tap', 1: 'double_tap', 2: 'shake', 3: 'fall'}
+# Gesture fast-poll: polls gesture() every 10 ms for this many ticks.
+# 5 ticks = 50 ms (tap reliable); 20 ticks = 200 ms (shake/double_tap reliable).
+_GESTURE_POLL_TICKS = 20
 
 # Subscriptions: port_id -> {type, mode, interval_ms, min_change, last_ms, last_val}
 _subscriptions = {}
@@ -177,16 +217,69 @@ def _system_event(metric, value):
     _send({'event': 'system', 'metric': metric, 'value': value})
 
 
-def _tilt_angles():
-    """Returns (pitch, roll, yaw) in degrees (integer), or (0, 0, 0) on error."""
+def _dot(a, b):
+    return a[0]*b[0] + a[1]*b[1] + a[2]*b[2]
+
+
+def _update_orientation(now):
+    """Update pitch/roll (complementary filter) and yaw (hardware or gyro).
+
+    Complementary filter blends gyro short-term precision with accelerometer
+    long-term correction: angle = CF_ALPHA*(angle + rate*dt) + (1-CF_ALPHA)*accel_angle.
+    FALLBACK: set _CF_ALPHA=0.0 to revert to pure accelerometer (accel_angle only).
+
+    Yaw strategy: Top/Bottom use drift-free hardware-fused yaw from tilt_angles()[0].
+    Other faces use gyro integration with a 1.5 deg/s stillness guard to limit tilt bleed.
+    """
+    global _cf_pitch, _cf_roll, _cf_last_ms, _yaw_acc
     try:
-        try:
+        # --- Shared sensor reads ---
+        a = hub.motion_sensor.acceleration()   # mg, sensor frame
+        ax, ay, az = a[0], a[1], a[2]
+        w = hub.motion_sensor.angular_velocity()  # decideg/s, sensor frame
+        wx, wy, wz = w[0] / 10.0, w[1] / 10.0, w[2] / 10.0
+
+        # --- Pitch / Roll: complementary filter ---
+        au = _dot(_orient_u, (ax, ay, az))
+        accel_pitch = math.degrees(math.atan2(_dot(_orient_f, (ax, ay, az)), au))
+        accel_roll  = math.degrees(math.atan2(_dot(_orient_l, (ax, ay, az)), au))
+
+        dt_ms = time.ticks_diff(now, _cf_last_ms) if _cf_last_ms else 0
+        _cf_last_ms = now
+
+        if 0 < dt_ms <= 500 and _CF_ALPHA > 0.0:
+            dt_s = dt_ms / 1000.0
+            # Pitch: negate because rotating l toward u (pitch+) is -rotation about l.
+            # Roll: positive because rotating l toward u about f-axis is +rotation about f.
+            pitch_rate = -_dot(_orient_l, (wx, wy, wz))
+            roll_rate  =  _dot(_orient_f, (wx, wy, wz))
+            _cf_pitch = _CF_ALPHA * (_cf_pitch + pitch_rate * dt_s) + (1.0 - _CF_ALPHA) * accel_pitch
+            _cf_roll  = _CF_ALPHA * (_cf_roll  + roll_rate  * dt_s) + (1.0 - _CF_ALPHA) * accel_roll
+        else:
+            # First tick, long gap, or CF_ALPHA=0 fallback: use pure accel.
+            _cf_pitch = accel_pitch
+            _cf_roll  = accel_roll
+
+        # --- Yaw ---
+        if abs(_orient_u[2]) > 0.5:
+            # Top / Bottom: drift-free hardware-fused yaw. CW from above = positive.
             raw = hub.motion_sensor.tilt_angles()
-        except AttributeError:
-            raw = hub.imu.tilt_angles()
-        return (raw[0] // 10, raw[1] // 10, (raw[2] - _yaw_offset) // 10)
+            _yaw_acc = -raw[0] / 10.0
+        else:
+            # Side / end mounting: gyro integration with stillness guard.
+            if 0 < dt_ms <= 500:
+                rate = -_dot(_orient_u, (wx, wy, wz))
+                if abs(rate) > 1.5:
+                    _yaw_acc += rate * (dt_ms / 1000.0)
     except Exception:
-        return (0, 0, 0)
+        pass
+
+
+def _tilt_angles():
+    """Returns (pitch, roll, yaw) in integer degrees for the current orientation."""
+    return (int(round(_cf_pitch)),
+            int(round(_cf_roll)),
+            int(round(_yaw_acc - _yaw_zero)))
 
 
 def _ensure_pair(lp, rp):
@@ -222,22 +315,27 @@ def _show_image(name):
 
 
 def _face_orientation():
-    """Return discrete face orientation string from IMU (v0.7)."""
+    """Return LEGO face name (Top/Bottom/Front/Back/Left side/Right side) from IMU."""
     try:
-        # Try firmware API first
         try:
-            return hub.motion_sensor.get_orientation()
+            raw = hub.motion_sensor.get_orientation()
+            return _FACE_NAME_MAP.get(raw, raw)  # map Python API string to LEGO name
         except AttributeError:
             pass
-        # Derive from pitch/roll angles (heuristic)
-        pitch, roll, _ = _tilt_angles()
-        if pitch > 60:   return 'port_e_up'
-        if pitch < -60:  return 'port_a_up'
-        if roll > 60:    return 'face_down'
-        if roll < -60:   return 'face_up'
-        return 'face_up'
+        # Fallback: detect face from gravity vector (sensor frame: acc[0]=USB, acc[1]=ACE, acc[2]=Top).
+        try:
+            a = hub.motion_sensor.acceleration()
+            ax, ay, az = abs(a[0]), abs(a[1]), abs(a[2])
+            if az >= ax and az >= ay:
+                return 'Top' if a[2] > 0 else 'Bottom'
+            elif ax >= ay:
+                return 'Front' if a[0] > 0 else 'Back'
+            else:
+                return 'Left side' if a[1] > 0 else 'Right side'
+        except Exception:
+            return 'Top'
     except Exception:
-        return 'face_up'
+        return 'Top'
 
 
 def _angular_velocity():
@@ -429,7 +527,7 @@ def _build_capability():
         'constraints': {
             'gesture': {
                 'type': 'enum',
-                'values': ['shake', 'tap', 'double_tap', 'fall', 'face_up', 'face_down'],
+                'values': ['shake', 'tap', 'double_tap', 'fall'],
             },
             'face_orientation': {
                 'type': 'enum',
@@ -936,32 +1034,42 @@ def _handle_timer(cmd, obj, req_id):
 
 def _handle_orientation(cmd, obj, req_id):
     """v0.7 orientation.* command category."""
-    global _yaw_offset
+    global _orient_u, _orient_f, _orient_l, _yaw_acc, _yaw_zero
+    global _cf_pitch, _cf_roll, _cf_last_ms
     action = cmd.split('.')[1]  # set_yaw, reset_yaw, set_reference
     try:
         if action == 'reset_yaw':
-            # Software offset: capture current raw yaw so relative yaw reads 0.
-            try:
-                _yaw_offset = hub.motion_sensor.tilt_angles()[2]
-            except Exception:
-                _yaw_offset = 0
-            try:
-                hub.motion_sensor.reset_yaw_angle()
-            except Exception:
-                pass
+            _yaw_zero = _yaw_acc
         elif action == 'set_yaw':
-            # Software offset: shift raw yaw so that reading equals requested angle.
             angle = int(obj.get('angle', 0))
-            try:
-                _yaw_offset = hub.motion_sensor.tilt_angles()[2] - angle * 10
-            except Exception:
-                _yaw_offset = -angle * 10
+            _yaw_zero = _yaw_acc - angle
         elif action == 'set_reference':
-            face = obj.get('face', 'face_up')
+            face = obj.get('face', 'Top')
+            f = _ORIENT_FRAMES.get(face, _ORIENT_FRAMES['Top'])
+            _orient_u = (f[0], f[1], f[2])
+            _orient_f = (f[3], f[4], f[5])
+            _orient_l = (f[6], f[7], f[8])
+            # Seed yaw from hardware if Top/Bottom, else start at 0.
             try:
-                hub.motion_sensor.set_yaw_face(face)
-            except AttributeError:
-                pass  # not available on all FW versions
+                if abs(f[2]) > 0.5:  # Top or Bottom
+                    raw = hub.motion_sensor.tilt_angles()
+                    _yaw_acc = -raw[0] / 10.0
+                else:
+                    _yaw_acc = 0.0
+            except Exception:
+                _yaw_acc = 0.0
+            _yaw_zero  = _yaw_acc  # reference point = current heading
+            _cf_last_ms = 0
+            # Seed filter from live accel so readings start at true value immediately.
+            try:
+                a = hub.motion_sensor.acceleration()
+                ax, ay, az = a[0], a[1], a[2]
+                au = _dot(_orient_u, (ax, ay, az))
+                _cf_pitch = math.degrees(math.atan2(_dot(_orient_f, (ax, ay, az)), au))
+                _cf_roll  = math.degrees(math.atan2(_dot(_orient_l, (ax, ay, az)), au))
+            except Exception:
+                _cf_pitch = 0.0
+                _cf_roll  = 0.0
     except Exception as e:
         _send_error(301, 'Orientation error: ' + str(e), req_id)
 
@@ -1052,6 +1160,26 @@ def _run_loop():
                 _subscriptions.clear()
                 _sys_subscriptions.clear()
 
+        # Update pitch/roll (complementary filter) and yaw every tick.
+        _update_orientation(now)
+
+        # Fast-poll gesture subscriptions: check every 10 ms for _GESTURE_POLL_TICKS ticks.
+        # 200 ms window catches shake and double_tap which need sustained/repeated motion.
+        for pid, sub in list(_subscriptions.items()):
+            if sub['type'] != 'gesture':
+                continue
+            for _ in range(_GESTURE_POLL_TICKS):
+                try:
+                    g = _GESTURE_MAP.get(hub.motion_sensor.gesture(), None)
+                except Exception:
+                    g = None
+                if g is not None:
+                    _sensor_event(pid, 'gesture', g)
+                    sub['last_val'] = None
+                    sub['last_ms'] = now
+                    break
+                time.sleep_ms(10)
+
         # Sensor subscriptions
         for pid, sub in list(_subscriptions.items()):
             elapsed = time.ticks_diff(now, sub['last_ms'])
@@ -1059,6 +1187,8 @@ def _run_loop():
                 continue
 
             stype = sub['type']
+            if stype == 'gesture':
+                continue  # handled by fast-poll above
             val = _read_sensor_value(pid, stype)
 
             if val is None:
