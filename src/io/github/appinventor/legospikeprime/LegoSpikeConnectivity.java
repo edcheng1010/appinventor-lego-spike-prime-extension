@@ -502,25 +502,29 @@ public class LegoSpikeConnectivity extends AndroidNonvisibleComponent {
         "\n" +
         "\n" +
         "def _read_system_metric(metric):\n" +
-        "    \"\"\"Reads a system metric value. Returns None on error.\"\"\"\n" +
         "    try:\n" +
         "        if metric == 'battery':\n" +
         "            try:\n" +
-        "                return hub.battery.level()\n" +
-        "            except AttributeError:\n" +
-        "                return hub.battery.voltage() // 40  # rough % from mV\n" +
+        "                v = hub.battery_voltage() if callable(hub.battery_voltage) else hub.battery_voltage\n" +
+        "                return max(0, min(100, (v - 6400) * 100 // 2000))\n" +
+        "            except Exception:\n" +
+        "                return None\n" +
         "        elif metric == 'temperature':\n" +
         "            try:\n" +
         "                return hub.temperature() / 10.0\n" +
-        "            except AttributeError:\n" +
-        "                return None\n" +
+        "            except Exception:\n" +
+        "                try:\n" +
+        "                    return hub.battery_temperature / 10.0\n" +
+        "                except Exception:\n" +
+        "                    return None\n" +
         "        elif metric == 'charging':\n" +
         "            try:\n" +
-        "                return hub.battery.charger_detect()\n" +
-        "            except AttributeError:\n" +
+        "                uc = hub.usb_charge_current() if callable(hub.usb_charge_current) else hub.usb_charge_current\n" +
+        "                return uc > 20\n" +
+        "            except Exception:\n" +
         "                return False\n" +
         "        elif metric == 'connection_rssi':\n" +
-        "            return None  # not accessible from Python\n" +
+        "            return None\n" +
         "    except Exception:\n" +
         "        return None\n" +
         "    return None\n" +

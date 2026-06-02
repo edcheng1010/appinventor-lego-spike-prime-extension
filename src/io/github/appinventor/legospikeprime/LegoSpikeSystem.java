@@ -78,16 +78,23 @@ public class LegoSpikeSystem extends AndroidNonvisibleComponent
     }
 
     @SimpleFunction(description =
-        "Request the BLE connection signal strength (dBm). Fires RSSIRead when received.")
+        "Request the live BLE connection signal strength (dBm). Fires RSSIRead when received.")
     public void GetRSSI() {
         if (!checkConnected()) return;
-        try {
-            int rssi = (Integer) connectivity.getBluetoothLE().getClass()
-                .getMethod("ConnectedDeviceRssi").invoke(connectivity.getBluetoothLE());
-            mainHandler.post(() -> RSSIRead(rssi));
-        } catch (Exception e) {
-            reportError("RSSI unavailable: " + e.getMessage());
-        }
+        final Component ble = connectivity.getBluetoothLE();
+        if (ble == null) return;
+        new Thread(() -> {
+            try {
+                // Trigger a fresh radio read, then sample the updated cache.
+                ble.getClass().getMethod("ReadConnectedRssi").invoke(ble);
+                Thread.sleep(250);
+                int rssi = (Integer) ble.getClass()
+                    .getMethod("ConnectedDeviceRssi").invoke(ble);
+                mainHandler.post(() -> RSSIRead(rssi));
+            } catch (Exception e) {
+                reportError("RSSI unavailable: " + e.getMessage());
+            }
+        }, "GetRSSI").start();
     }
 
     // =========================================================================

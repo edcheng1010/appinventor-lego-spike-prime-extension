@@ -457,22 +457,30 @@ def _read_system_metric(metric):
     """Reads a system metric value. Returns None on error."""
     try:
         if metric == 'battery':
+            # hub.battery_voltage may be a callable or direct attribute.
+            # Normalise to 0-100 assuming ~6400-8400 mV range (2-cell Li-ion).
             try:
-                return hub.battery.level()
-            except AttributeError:
-                return hub.battery.voltage() // 40  # rough % from mV
+                v = hub.battery_voltage() if callable(hub.battery_voltage) else hub.battery_voltage
+                return max(0, min(100, (v - 6400) * 100 // 2000))
+            except Exception:
+                return None
         elif metric == 'temperature':
             try:
                 return hub.temperature() / 10.0  # hub returns decidegrees
-            except AttributeError:
-                return None
+            except Exception:
+                try:
+                    return hub.battery_temperature / 10.0
+                except Exception:
+                    return None
         elif metric == 'charging':
+            # usb_charge_current: ~0-3 unplugged, ~190+ when charging (measured).
             try:
-                return hub.battery.charger_detect()
-            except AttributeError:
+                uc = hub.usb_charge_current() if callable(hub.usb_charge_current) else hub.usb_charge_current
+                return uc > 20
+            except Exception:
                 return False
         elif metric == 'connection_rssi':
-            return None  # not accessible from Python
+            return None  # measured on Android side, not accessible from Python
     except Exception:
         return None
     return None
