@@ -456,6 +456,19 @@ def _read_sensor_value(port_id, sensor_type):
             return force_sensor.force(p)
         elif sensor_type == 'touched':
             return force_sensor.pressed(p)
+        elif sensor_type == 'is_color':
+            c = color_sensor.color(p)
+            name = _CLR_MAP.get(c, str(c)).lower()
+            queried = obj.get('color', '').lower()
+            # Return dict so Java can echo back the queried color name.
+            return {'match': name == queried, 'color': queried}
+        elif sensor_type == 'is_closer':
+            d = distance_sensor.distance(p)
+            mm = int(obj.get('mm', 0))
+            return isinstance(d, (int, float)) and 0 <= d <= mm
+        elif sensor_type == 'is_reflected_above':
+            r = color_sensor.reflection(p)
+            return isinstance(r, (int, float)) and r > int(obj.get('percent', 0))
     except Exception:
         return None
 
@@ -905,6 +918,9 @@ def _handle_sound(cmd, obj, req_id):
             else:
                 # Indefinite beep — no native API; just beep for a long time
                 hub.sound.beep(freq, 30000, _hw_volume())
+
+        elif action == 'rest':
+            time.sleep_ms(int(obj.get('duration', 0)))
 
         elif action == 'stop':
             hub.sound.stop()

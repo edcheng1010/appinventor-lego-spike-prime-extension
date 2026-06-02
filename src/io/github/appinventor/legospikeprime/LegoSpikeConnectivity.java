@@ -502,6 +502,18 @@ public class LegoSpikeConnectivity extends AndroidNonvisibleComponent {
         "            return force_sensor.force(p)\n" +
         "        elif sensor_type == 'touched':\n" +
         "            return force_sensor.pressed(p)\n" +
+        "        elif sensor_type == 'is_color':\n" +
+        "            c = color_sensor.color(p)\n" +
+        "            name = _CLR_MAP.get(c, str(c)).lower()\n" +
+        "            queried = obj.get('color', '').lower()\n" +
+        "            return {'match': name == queried, 'color': queried}\n" +
+        "        elif sensor_type == 'is_closer':\n" +
+        "            d = distance_sensor.distance(p)\n" +
+        "            mm = int(obj.get('mm', 0))\n" +
+        "            return isinstance(d, (int, float)) and 0 <= d <= mm\n" +
+        "        elif sensor_type == 'is_reflected_above':\n" +
+        "            r = color_sensor.reflection(p)\n" +
+        "            return isinstance(r, (int, float)) and r > int(obj.get('percent', 0))\n" +
         "    except Exception:\n" +
         "        return None\n" +
         "\n" +
@@ -941,6 +953,9 @@ public class LegoSpikeConnectivity extends AndroidNonvisibleComponent {
         "            else:\n" +
         "                # Indefinite beep — no native API; just beep for a long time\n" +
         "                hub.sound.beep(freq, 30000, _hw_volume())\n" +
+        "\n" +
+        "        elif action == 'rest':\n" +
+        "            time.sleep_ms(int(obj.get('duration', 0)))\n" +
         "\n" +
         "        elif action == 'stop':\n" +
         "            hub.sound.stop()\n" +

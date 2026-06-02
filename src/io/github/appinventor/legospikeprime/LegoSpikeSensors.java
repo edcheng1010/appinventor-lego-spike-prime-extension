@@ -182,6 +182,33 @@ public class LegoSpikeSensors extends AndroidNonvisibleComponent
             .withPort(forceSensorPort).withParam("type", "touched"));
     }
 
+    @SimpleFunction(description =
+        "Ask whether the color sensor reads the given color. "
+        + "Fires ColorChecked when the hub responds.")
+    public void IsColor(@Options(SensorColor.class) String color) {
+        SensorColor c = SensorColor.fromUnderlyingValue(color);
+        String name = c != null ? c.toUnderlyingValue().toLowerCase() : color.toLowerCase();
+        sendSensorSSP(new SSPMessage("sensor.read")
+            .withPort(colorSensorPort).withParam("type", "is_color").withParam("color", name));
+    }
+
+    @SimpleFunction(description =
+        "Ask whether an object is closer than the given distance (mm). "
+        + "Fires DistanceChecked when the hub responds.")
+    public void IsCloserThan(int mm) {
+        sendSensorSSP(new SSPMessage("sensor.read")
+            .withPort(distanceSensorPort).withParam("type", "is_closer").withParam("mm", mm));
+    }
+
+    @SimpleFunction(description =
+        "Ask whether the reflected light is above the given percent (0–100). "
+        + "Fires ReflectedLightChecked when the hub responds.")
+    public void IsReflectedLightAbove(int percent) {
+        sendSensorSSP(new SSPMessage("sensor.read")
+            .withPort(colorSensorPort).withParam("type", "is_reflected_above")
+            .withParam("percent", percent));
+    }
+
     /**
      * Request the hub tilt angle for the configured Axis.
      * Fires HubTiltAngleRead(axis, degrees) when the hub responds.
@@ -237,6 +264,24 @@ public class LegoSpikeSensors extends AndroidNonvisibleComponent
         "Fired when the hub reports whether the force sensor is pressed.")
     public void ForceSensorPressed(String port, boolean isPressed) {
         EventDispatcher.dispatchEvent(this, "ForceSensorPressed", port, isPressed);
+    }
+
+    @SimpleEvent(description =
+        "Fired when IsColor responds. isMatch: true if color matches.")
+    public void ColorChecked(String port, String color, boolean isMatch) {
+        EventDispatcher.dispatchEvent(this, "ColorChecked", port, color, isMatch);
+    }
+
+    @SimpleEvent(description =
+        "Fired when IsCloserThan responds. isCloser: true if object is within the threshold.")
+    public void DistanceChecked(String port, boolean isCloser) {
+        EventDispatcher.dispatchEvent(this, "DistanceChecked", port, isCloser);
+    }
+
+    @SimpleEvent(description =
+        "Fired when IsReflectedLightAbove responds. isAbove: true if reflected light exceeds threshold.")
+    public void ReflectedLightChecked(String port, boolean isAbove) {
+        EventDispatcher.dispatchEvent(this, "ReflectedLightChecked", port, isAbove);
     }
 
     @SimpleEvent(description =
@@ -326,6 +371,27 @@ public class LegoSpikeSensors extends AndroidNonvisibleComponent
                         ? (Boolean) val
                         : "true".equalsIgnoreCase(val != null ? val.toString() : "");
                     mainHandler.post(() -> ForceSensorPressed(port, pressed));
+                    break;
+                }
+                case "is_color": {
+                    try {
+                        org.json.JSONObject d = (org.json.JSONObject) val;
+                        final boolean match = d.optBoolean("match", false);
+                        final String checkedColor = d.optString("color", "");
+                        mainHandler.post(() -> ColorChecked(port, checkedColor, match));
+                    } catch (Exception ignored) {}
+                    break;
+                }
+                case "is_closer": {
+                    final boolean closer = val instanceof Boolean ? (Boolean) val
+                        : "true".equalsIgnoreCase(val != null ? val.toString() : "");
+                    mainHandler.post(() -> DistanceChecked(port, closer));
+                    break;
+                }
+                case "is_reflected_above": {
+                    final boolean above = val instanceof Boolean ? (Boolean) val
+                        : "true".equalsIgnoreCase(val != null ? val.toString() : "");
+                    mainHandler.post(() -> ReflectedLightChecked(port, above));
                     break;
                 }
                 case "pitch":
