@@ -116,7 +116,7 @@ public class LegoSpikeSensors extends AndroidNonvisibleComponent
     public String DistanceSensorPort() { return distanceSensorPort; }
 
     @SimpleProperty(category = PropertyCategory.BEHAVIOR,
-        description = "Port (A–F) where the force sensor is connected (used by GetForce and IsForceSensorPressed)")
+        description = "Port (A–F) where the force sensor is connected (used by GetForce and IsForceSensorChecked)")
     @DesignerProperty(
         editorType   = PropertyTypeConstants.PROPERTY_TYPE_CHOICES,
         editorArgs   = {"A", "B", "C", "D", "E", "F"},
@@ -127,7 +127,7 @@ public class LegoSpikeSensors extends AndroidNonvisibleComponent
     }
 
     @SimpleProperty(category = PropertyCategory.BEHAVIOR,
-        description = "Port (A–F) where the force sensor is connected (used by GetForce and IsForceSensorPressed)")
+        description = "Port (A–F) where the force sensor is connected (used by GetForce and IsForceSensorChecked)")
     public String ForceSensorPort() { return forceSensorPort; }
 
     // =========================================================================
@@ -172,12 +172,12 @@ public class LegoSpikeSensors extends AndroidNonvisibleComponent
 
     /**
      * Request whether the force sensor on the configured Port is pressed.
-     * Fires ForceSensorPressed(port, isPressed) when the hub responds.
+     * Fires ForceSensorChecked(port, isPressed) when the hub responds.
      */
     @SimpleFunction(description =
         "Ask whether the force sensor on the configured Port is pressed. "
-        + "Fires ForceSensorPressed when the hub responds.")
-    public void IsForceSensorPressed() {
+        + "Fires ForceSensorChecked when the hub responds.")
+    public void IsForceSensorChecked() {
         sendSensorSSP(new SSPMessage("sensor.read")
             .withPort(forceSensorPort).withParam("type", "touched"));
     }
@@ -224,7 +224,7 @@ public class LegoSpikeSensors extends AndroidNonvisibleComponent
 
     @SimpleFunction(description =
         "Ask whether the hub is tilted in the given direction from flat. "
-        + "Fires TiltChecked when the hub responds. "
+        + "Fires HubTiltChecked when the hub responds. "
         + "Directions: Forward (USB tilted down), Backward (mic down), "
         + "Left (A/C/E side down), Right (B/D/F side down), Any.")
     public void IsTilted(@Options(TiltDirection.class) String direction) {
@@ -304,14 +304,14 @@ public class LegoSpikeSensors extends AndroidNonvisibleComponent
 
     @SimpleEvent(description =
         "Fired when the hub reports whether the force sensor is pressed.")
-    public void ForceSensorPressed(String port, boolean isPressed) {
-        EventDispatcher.dispatchEvent(this, "ForceSensorPressed", port, isPressed);
+    public void ForceSensorChecked(String port, boolean isPressed) {
+        EventDispatcher.dispatchEvent(this, "ForceSensorChecked", port, isPressed);
     }
 
     @SimpleEvent(description =
         "Fired when IsTilted responds. isTilted: true if hub is tilted in the given direction.")
-    public void TiltChecked(String direction, boolean isTilted) {
-        EventDispatcher.dispatchEvent(this, "TiltChecked", direction, isTilted);
+    public void HubTiltChecked(String direction, boolean isTilted) {
+        EventDispatcher.dispatchEvent(this, "HubTiltChecked", direction, isTilted);
     }
 
     @SimpleEvent(description =
@@ -445,7 +445,7 @@ public class LegoSpikeSensors extends AndroidNonvisibleComponent
                     final boolean pressed = val instanceof Boolean
                         ? (Boolean) val
                         : "true".equalsIgnoreCase(val != null ? val.toString() : "");
-                    mainHandler.post(() -> ForceSensorPressed(port, pressed));
+                    mainHandler.post(() -> ForceSensorChecked(port, pressed));
                     break;
                 }
                 case "is_tilted": {
@@ -453,7 +453,7 @@ public class LegoSpikeSensors extends AndroidNonvisibleComponent
                         org.json.JSONObject d = (org.json.JSONObject) val;
                         final boolean tilted = d.optBoolean("tilted", false);
                         final String dir = d.optString("direction", "any");
-                        mainHandler.post(() -> TiltChecked(dir, tilted));
+                        mainHandler.post(() -> HubTiltChecked(dir, tilted));
                     } catch (Exception ignored) {}
                     break;
                 }
