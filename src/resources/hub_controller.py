@@ -295,14 +295,19 @@ def _tilt_angles():
 
 
 def _ensure_pair(lp, rp):
-    """Re-pair motor pair only when ports change."""
+    """Re-pair motor pair only when ports change. Unpair first so a new pair
+    can replace an existing one; only cache the ports if pairing succeeds."""
     global _mov_lp, _mov_rp
     if lp != _mov_lp or rp != _mov_rp:
         try:
+            try:
+                motor_pair.unpair(motor_pair.PAIR_1)
+            except Exception:
+                pass
             motor_pair.pair(motor_pair.PAIR_1, PORTS[lp], PORTS[rp])
+            _mov_lp, _mov_rp = lp, rp  # only cache on successful pair
         except Exception:
-            pass
-        _mov_lp, _mov_rp = lp, rp
+            _mov_lp, _mov_rp = None, None  # force retry next time
 
 
 def _show_image(name):
@@ -364,7 +369,7 @@ def _read_sensor_value(port_id, sensor_type, params=None):
     # IMU-specific types routed directly
     if port_id == 'imu' or sensor_type in ('pitch', 'roll', 'yaw',
                                              'face_orientation', 'angular_velocity',
-                                             'acceleration', 'gesture'):
+                                             'acceleration', 'gesture', 'is_tilted'):
         try:
             if sensor_type == 'pitch':          return _tilt_angles()[0]
             if sensor_type == 'roll':           return _tilt_angles()[1]
@@ -378,13 +383,23 @@ def _read_sensor_value(port_id, sensor_type, params=None):
                     return None
             if sensor_type == 'acceleration':
                 try:
-                    # Hub returns mg — convert to m/s² (1g = 9810 mg, divide by 100 ≈ m/s²)
                     acc = hub.motion_sensor.acceleration()
                     return {'x': round(acc[0] / 100.0, 2),
                             'y': round(acc[1] / 100.0, 2),
                             'z': round(acc[2] / 100.0, 2)}
                 except Exception:
                     return {'x': 0, 'y': 0, 'z': 0}
+            if sensor_type == 'is_tilted':
+                p2 = params or {}
+                direction = p2.get('direction', 'any').lower()
+                pitch, roll, _ = _tilt_angles()
+                THRESHOLD = 20
+                if direction == 'forward':    result = pitch < -THRESHOLD
+                elif direction == 'backward': result = pitch > THRESHOLD
+                elif direction == 'left':     result = roll < -THRESHOLD  # A/C/E side down = roll negative
+                elif direction == 'right':    result = roll > THRESHOLD   # B/D/F side down = roll positive
+                else:                         result = abs(pitch) > THRESHOLD or abs(roll) > THRESHOLD
+                return {'tilted': result, 'direction': direction}
         except Exception:
             return None
 
@@ -456,17 +471,6 @@ def _read_sensor_value(port_id, sensor_type, params=None):
             return force_sensor.force(p)
         elif sensor_type == 'touched':
             return force_sensor.pressed(p)
-        elif sensor_type == 'is_tilted':
-            p2 = params or {}
-            direction = p2.get('direction', 'any').lower()
-            pitch, roll, _ = _tilt_angles()
-            THRESHOLD = 20
-            if direction == 'forward':   result = pitch < -THRESHOLD
-            elif direction == 'backward': result = pitch > THRESHOLD
-            elif direction == 'left':    result = roll > THRESHOLD
-            elif direction == 'right':   result = roll < -THRESHOLD
-            else:                        result = abs(pitch) > THRESHOLD or abs(roll) > THRESHOLD
-            return {'tilted': result, 'direction': direction}
         elif sensor_type == 'is_color':
             p2 = params or {}
             c = color_sensor.color(p)

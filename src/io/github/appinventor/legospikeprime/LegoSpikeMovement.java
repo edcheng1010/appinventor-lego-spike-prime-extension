@@ -136,8 +136,14 @@ public class LegoSpikeMovement extends AndroidNonvisibleComponent {
         + "Equivalent to setting LeftPort and RightPort separately.")
     public void SetMovementPair(@Options(Port.class) String leftMotorPort,
                                 @Options(Port.class) String rightMotorPort) {
-        LeftPort(leftMotorPort);
-        RightPort(rightMotorPort);
+        Port l = Port.fromUnderlyingValue(leftMotorPort);
+        Port r = Port.fromUnderlyingValue(rightMotorPort);
+        if (l != null) leftPort = l.toUnderlyingValue();
+        if (r != null) rightPort = r.toUnderlyingValue();
+        // Send configure command immediately so hub re-pairs without waiting for next move.
+        if (!checkConnected()) return;
+        connectivity.sendSSP(new SSPMessage("movement.configure")
+            .withParam("left", leftPort).withParam("right", rightPort));
     }
 
     @SimpleFunction(description =

@@ -343,14 +343,17 @@ public class LegoSpikeConnectivity extends AndroidNonvisibleComponent {
         "\n" +
         "\n" +
         "def _ensure_pair(lp, rp):\n" +
-        "    \"\"\"Re-pair motor pair only when ports change.\"\"\"\n" +
         "    global _mov_lp, _mov_rp\n" +
         "    if lp != _mov_lp or rp != _mov_rp:\n" +
         "        try:\n" +
+        "            try:\n" +
+        "                motor_pair.unpair(motor_pair.PAIR_1)\n" +
+        "            except Exception:\n" +
+        "                pass\n" +
         "            motor_pair.pair(motor_pair.PAIR_1, PORTS[lp], PORTS[rp])\n" +
+        "            _mov_lp, _mov_rp = lp, rp\n" +
         "        except Exception:\n" +
-        "            pass\n" +
-        "        _mov_lp, _mov_rp = lp, rp\n" +
+        "            _mov_lp, _mov_rp = None, None\n" +
         "\n" +
         "\n" +
         "def _show_image(name):\n" +
@@ -411,7 +414,7 @@ public class LegoSpikeConnectivity extends AndroidNonvisibleComponent {
         "    # IMU-specific types routed directly\n" +
         "    if port_id == 'imu' or sensor_type in ('pitch', 'roll', 'yaw',\n" +
         "                                             'face_orientation', 'angular_velocity',\n" +
-        "                                             'acceleration', 'gesture'):\n" +
+        "                                             'acceleration', 'gesture', 'is_tilted'):\n" +
         "        try:\n" +
         "            if sensor_type == 'pitch':          return _tilt_angles()[0]\n" +
         "            if sensor_type == 'roll':           return _tilt_angles()[1]\n" +
@@ -432,6 +435,17 @@ public class LegoSpikeConnectivity extends AndroidNonvisibleComponent {
         "                            'z': round(acc[2] / 100.0, 2)}\n" +
         "                except Exception:\n" +
         "                    return {'x': 0, 'y': 0, 'z': 0}\n" +
+        "            if sensor_type == 'is_tilted':\n" +
+        "                p2 = params or {}\n" +
+        "                direction = p2.get('direction', 'any').lower()\n" +
+        "                pitch, roll, _ = _tilt_angles()\n" +
+        "                THRESHOLD = 20\n" +
+        "                if direction == 'forward':    result = pitch < -THRESHOLD\n" +
+        "                elif direction == 'backward': result = pitch > THRESHOLD\n" +
+        "                elif direction == 'left':     result = roll < -THRESHOLD\n" +
+        "                elif direction == 'right':    result = roll > THRESHOLD\n" +
+        "                else:                         result = abs(pitch) > THRESHOLD or abs(roll) > THRESHOLD\n" +
+        "                return {'tilted': result, 'direction': direction}\n" +
         "        except Exception:\n" +
         "            return None\n" +
         "\n" +
@@ -502,17 +516,6 @@ public class LegoSpikeConnectivity extends AndroidNonvisibleComponent {
         "            return force_sensor.force(p)\n" +
         "        elif sensor_type == 'touched':\n" +
         "            return force_sensor.pressed(p)\n" +
-        "        elif sensor_type == 'is_tilted':\n" +
-        "            p2 = params or {}\n" +
-        "            direction = p2.get('direction', 'any').lower()\n" +
-        "            pitch, roll, _ = _tilt_angles()\n" +
-        "            THRESHOLD = 20\n" +
-        "            if direction == 'forward':    result = pitch < -THRESHOLD\n" +
-        "            elif direction == 'backward': result = pitch > THRESHOLD\n" +
-        "            elif direction == 'left':     result = roll > THRESHOLD\n" +
-        "            elif direction == 'right':    result = roll < -THRESHOLD\n" +
-        "            else:                         result = abs(pitch) > THRESHOLD or abs(roll) > THRESHOLD\n" +
-        "            return {'tilted': result, 'direction': direction}\n" +
         "        elif sensor_type == 'is_color':\n" +
         "            p2 = params or {}\n" +
         "            c = color_sensor.color(p)\n" +
