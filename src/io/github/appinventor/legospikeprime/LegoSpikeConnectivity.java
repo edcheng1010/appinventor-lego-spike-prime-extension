@@ -502,6 +502,17 @@ public class LegoSpikeConnectivity extends AndroidNonvisibleComponent {
         "            return force_sensor.force(p)\n" +
         "        elif sensor_type == 'touched':\n" +
         "            return force_sensor.pressed(p)\n" +
+        "        elif sensor_type == 'is_tilted':\n" +
+        "            p2 = params or {}\n" +
+        "            direction = p2.get('direction', 'any').lower()\n" +
+        "            pitch, roll, _ = _tilt_angles()\n" +
+        "            THRESHOLD = 20\n" +
+        "            if direction == 'forward':    result = pitch < -THRESHOLD\n" +
+        "            elif direction == 'backward': result = pitch > THRESHOLD\n" +
+        "            elif direction == 'left':     result = roll > THRESHOLD\n" +
+        "            elif direction == 'right':    result = roll < -THRESHOLD\n" +
+        "            else:                         result = abs(pitch) > THRESHOLD or abs(roll) > THRESHOLD\n" +
+        "            return {'tilted': result, 'direction': direction}\n" +
         "        elif sensor_type == 'is_color':\n" +
         "            p2 = params or {}\n" +
         "            c = color_sensor.color(p)\n" +

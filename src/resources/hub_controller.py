@@ -456,6 +456,17 @@ def _read_sensor_value(port_id, sensor_type, params=None):
             return force_sensor.force(p)
         elif sensor_type == 'touched':
             return force_sensor.pressed(p)
+        elif sensor_type == 'is_tilted':
+            p2 = params or {}
+            direction = p2.get('direction', 'any').lower()
+            pitch, roll, _ = _tilt_angles()
+            THRESHOLD = 20
+            if direction == 'forward':   result = pitch < -THRESHOLD
+            elif direction == 'backward': result = pitch > THRESHOLD
+            elif direction == 'left':    result = roll > THRESHOLD
+            elif direction == 'right':   result = roll < -THRESHOLD
+            else:                        result = abs(pitch) > THRESHOLD or abs(roll) > THRESHOLD
+            return {'tilted': result, 'direction': direction}
         elif sensor_type == 'is_color':
             p2 = params or {}
             c = color_sensor.color(p)

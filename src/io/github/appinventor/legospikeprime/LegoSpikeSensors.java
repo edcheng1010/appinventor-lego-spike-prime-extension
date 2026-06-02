@@ -193,6 +193,18 @@ public class LegoSpikeSensors extends AndroidNonvisibleComponent
     }
 
     @SimpleFunction(description =
+        "Ask whether the hub is tilted in the given direction from flat. "
+        + "Fires TiltChecked when the hub responds. "
+        + "Directions: Forward (USB tilted down), Backward (mic down), "
+        + "Left (A/C/E side down), Right (B/D/F side down), Any.")
+    public void IsTilted(@Options(TiltDirection.class) String direction) {
+        TiltDirection d = TiltDirection.fromUnderlyingValue(direction);
+        String dir = d != null ? d.toUnderlyingValue().toLowerCase() : "any";
+        sendSensorSSP(new SSPMessage("sensor.read")
+            .withPort("imu").withParam("type", "is_tilted").withParam("direction", dir));
+    }
+
+    @SimpleFunction(description =
         "Ask whether an object is closer than the given distance (mm). "
         + "Fires DistanceChecked when the hub responds.")
     public void IsCloserThan(int mm) {
@@ -264,6 +276,12 @@ public class LegoSpikeSensors extends AndroidNonvisibleComponent
         "Fired when the hub reports whether the force sensor is pressed.")
     public void ForceSensorPressed(String port, boolean isPressed) {
         EventDispatcher.dispatchEvent(this, "ForceSensorPressed", port, isPressed);
+    }
+
+    @SimpleEvent(description =
+        "Fired when IsTilted responds. isTilted: true if hub is tilted in the given direction.")
+    public void TiltChecked(String direction, boolean isTilted) {
+        EventDispatcher.dispatchEvent(this, "TiltChecked", direction, isTilted);
     }
 
     @SimpleEvent(description =
@@ -371,6 +389,15 @@ public class LegoSpikeSensors extends AndroidNonvisibleComponent
                         ? (Boolean) val
                         : "true".equalsIgnoreCase(val != null ? val.toString() : "");
                     mainHandler.post(() -> ForceSensorPressed(port, pressed));
+                    break;
+                }
+                case "is_tilted": {
+                    try {
+                        org.json.JSONObject d = (org.json.JSONObject) val;
+                        final boolean tilted = d.optBoolean("tilted", false);
+                        final String dir = d.optString("direction", "any");
+                        mainHandler.post(() -> TiltChecked(dir, tilted));
+                    } catch (Exception ignored) {}
                     break;
                 }
                 case "is_color": {

@@ -132,6 +132,15 @@ public class LegoSpikeMovement extends AndroidNonvisibleComponent {
      * @param speed 0–100 percent
      */
     @SimpleFunction(description =
+        "Set the left and right motor ports for this drivebase in one call. "
+        + "Equivalent to setting LeftPort and RightPort separately.")
+    public void SetMovementPair(@Options(Port.class) String leftMotorPort,
+                                @Options(Port.class) String rightMotorPort) {
+        LeftPort(leftMotorPort);
+        RightPort(rightMotorPort);
+    }
+
+    @SimpleFunction(description =
         "Set the movement speed (0–100). Applied on the next StartMoving or "
         + "StartMovingWithSteering call.")
     public void SetMovementSpeed(int speed) {
