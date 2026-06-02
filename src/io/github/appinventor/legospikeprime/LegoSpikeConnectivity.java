@@ -406,7 +406,7 @@ public class LegoSpikeConnectivity extends AndroidNonvisibleComponent {
         "        return {'x': 0, 'y': 0, 'z': 0}\n" +
         "\n" +
         "\n" +
-        "def _read_sensor_value(port_id, sensor_type):\n" +
+        "def _read_sensor_value(port_id, sensor_type, params=None):\n" +
         "    \"\"\"Reads a sensor value. Returns None on error.\"\"\"\n" +
         "    # IMU-specific types routed directly\n" +
         "    if port_id == 'imu' or sensor_type in ('pitch', 'roll', 'yaw',\n" +
@@ -503,17 +503,20 @@ public class LegoSpikeConnectivity extends AndroidNonvisibleComponent {
         "        elif sensor_type == 'touched':\n" +
         "            return force_sensor.pressed(p)\n" +
         "        elif sensor_type == 'is_color':\n" +
+        "            p2 = params or {}\n" +
         "            c = color_sensor.color(p)\n" +
         "            name = _CLR_MAP.get(c, str(c)).lower()\n" +
-        "            queried = obj.get('color', '').lower()\n" +
+        "            queried = p2.get('color', '').lower()\n" +
         "            return {'match': name == queried, 'color': queried}\n" +
         "        elif sensor_type == 'is_closer':\n" +
+        "            p2 = params or {}\n" +
         "            d = distance_sensor.distance(p)\n" +
-        "            mm = int(obj.get('mm', 0))\n" +
+        "            mm = int(p2.get('mm', 0))\n" +
         "            return isinstance(d, (int, float)) and 0 <= d <= mm\n" +
         "        elif sensor_type == 'is_reflected_above':\n" +
+        "            p2 = params or {}\n" +
         "            r = color_sensor.reflection(p)\n" +
-        "            return isinstance(r, (int, float)) and r > int(obj.get('percent', 0))\n" +
+        "            return isinstance(r, (int, float)) and r > int(p2.get('percent', 0))\n" +
         "    except Exception:\n" +
         "        return None\n" +
         "\n" +
@@ -1053,7 +1056,7 @@ public class LegoSpikeConnectivity extends AndroidNonvisibleComponent {
         "\n" +
         "    elif action == 'read':\n" +
         "        sensor_type = obj.get('type', 'color')\n" +
-        "        val = _read_sensor_value(port_id, sensor_type)\n" +
+        "        val = _read_sensor_value(port_id, sensor_type, obj)\n" +
         "        if val is not None:\n" +
         "            _sensor_event(port_id, sensor_type, val, req_id)\n" +
         "\n" +

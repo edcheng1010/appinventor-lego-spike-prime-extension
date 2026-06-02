@@ -359,7 +359,7 @@ def _angular_velocity():
         return {'x': 0, 'y': 0, 'z': 0}
 
 
-def _read_sensor_value(port_id, sensor_type):
+def _read_sensor_value(port_id, sensor_type, params=None):
     """Reads a sensor value. Returns None on error."""
     # IMU-specific types routed directly
     if port_id == 'imu' or sensor_type in ('pitch', 'roll', 'yaw',
@@ -457,18 +457,20 @@ def _read_sensor_value(port_id, sensor_type):
         elif sensor_type == 'touched':
             return force_sensor.pressed(p)
         elif sensor_type == 'is_color':
+            p2 = params or {}
             c = color_sensor.color(p)
             name = _CLR_MAP.get(c, str(c)).lower()
-            queried = obj.get('color', '').lower()
-            # Return dict so Java can echo back the queried color name.
+            queried = p2.get('color', '').lower()
             return {'match': name == queried, 'color': queried}
         elif sensor_type == 'is_closer':
+            p2 = params or {}
             d = distance_sensor.distance(p)
-            mm = int(obj.get('mm', 0))
+            mm = int(p2.get('mm', 0))
             return isinstance(d, (int, float)) and 0 <= d <= mm
         elif sensor_type == 'is_reflected_above':
+            p2 = params or {}
             r = color_sensor.reflection(p)
-            return isinstance(r, (int, float)) and r > int(obj.get('percent', 0))
+            return isinstance(r, (int, float)) and r > int(p2.get('percent', 0))
     except Exception:
         return None
 
@@ -1020,7 +1022,7 @@ def _handle_sensor(cmd, obj, req_id):
 
     elif action == 'read':
         sensor_type = obj.get('type', 'color')
-        val = _read_sensor_value(port_id, sensor_type)
+        val = _read_sensor_value(port_id, sensor_type, obj)
         if val is not None:
             _sensor_event(port_id, sensor_type, val, req_id)
 
