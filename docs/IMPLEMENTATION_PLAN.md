@@ -425,7 +425,7 @@ Bumping the bridge from v0.6 to v0.8 is part of Phase 3:
 - **3.11.7** `sound.read` handler returning cached volume
 - **3.11.8** `sensor.read`/`sensor.subscribe` dispatch for `face_orientation` and `angular_velocity` on `imu` port
 - **3.11.9** `touch` event emitter for the light matrix (only if FW 3.x exposes tap events)
-- **3.11.10** `led.matrix.pixel` routing for sensor-attached display ports — dispatch to `distance_sensor.light_up()` or the color-matrix-accessory API depending on port id
+- **3.11.10** ✅ `led.matrix.pixel` routing for sensor-attached display ports — implemented as `led.distance` command dispatching to `distance_sensor.show(port, [tl,tr,bl,br])`. Exposed as `LightUpDistanceSensor(tl,tr,bl,br)` in LegoSpikeSensors using `DistanceSensorPort`. 3×3 color matrix accessory deferred as future bonus feature.
 
 **New v0.8 commands:**
 - **3.11.11** `motor.set_acceleration` with `rate` param (ms to ramp 0→100% speed)
