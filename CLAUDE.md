@@ -27,12 +27,12 @@ This is an MIT App Inventor extension for LEGO SPIKE Prime hubs, developed by Ed
    - You must stop scanning before initiating a connection to a hub.
    - Use the `wasScanningBeforeConnection` flag to resume scanning if the connection fails or drops.
 
-5. **ALWAYS use SSP v0.6 JSON commands over TunnelMessage — never custom binary strings.**
+5. **ALWAYS use SSP v0.8 JSON commands over TunnelMessage — never custom binary strings.**
    - SPIKE Prime 3.x does NOT support direct hardware control via raw BLE commands.
-   - The wire format is SSP v0.6 JSON (e.g. `{"cmd":"motor.run","port":"A","speed":75}`) sent as a newline-terminated UTF-8 string via TunnelMessage (opcode 0x32), COBS-encoded.
+   - The wire format is SSP v0.8 JSON (e.g. `{"cmd":"motor.run","port":"A","speed":75}`) sent as a newline-terminated UTF-8 string via TunnelMessage (opcode 0x32), COBS-encoded.
    - Use `LegoSpikeConnectivity.sendSSP(SSPMessage)` — never `sendCommand(String)` with custom binary strings.
    - The hub-side Python controller (`hub_controller.py`) parses the SSP JSON; it is automatically uploaded on first connection to a new hub.
-   - See `docs/SSP_BRIDGE_GUIDE.md` for the complete SSP v0.6 mapping and `spec/SSP-v0.6.md` in solaria-hub for the protocol specification.
+   - See `docs/SSP_BRIDGE_GUIDE.md` for the complete SSP v0.8 mapping and `spec/SSP-v0.8.md` in solaria-hub for the protocol specification.
 
 6. **ALWAYS use correct COBS encoding constants.**
    - DELIMITER = 0x02
@@ -112,26 +112,21 @@ The extension must contain a Python program string that gets uploaded to the hub
 4. **Commit small, logical changes.** Use Git branching for experimental features.
 5. **Never modify files without explicit approval from Edward (project owner).**
 
-## Known Issues / Next Steps (Priority Order)
+## Development Phases
 
-### Phase 1: Protocol Correction (CRITICAL)
-1. Verify COBSEncoder.java constants match the verified values in Rule 6
-2. Implement file upload protocol (ClearSlot -> StartFileUpload -> TransferChunk)
-3. Implement program start (ProgramFlowRequest 0x1E)
-4. Implement TunnelMessage send (0x32) and receive
-5. Create and embed hub-side Python controller program
+### Phase 1: Foundation ✅ Complete
+Protocol correction, COBS encoding, BLE connection reliability.
 
-### Phase 2: Hub-Side Python Program
-1. Design comprehensive command protocol for motor control (all 6 ports)
-2. Add LED matrix control commands
-3. Add sensor reading commands (color, distance, force)
-4. Add hub status commands (battery, orientation)
+### Phase 2: SSP v0.8 Migration ✅ Complete
+Hub-side Python rewrite (SSP v0.8), Java SSP infrastructure, full component migration.
+103 hardware test cases passed. 161+ Java unit tests passing.
 
-### Phase 3: Testing and Validation
-1. Test BLE connection with physical SPIKE Prime hub
-2. Test program upload reliability
-3. Test TunnelMessage latency
-4. Test reconnection after disconnect
+### Phase 3: Post-MVP Block Expansion ✅ Complete
+Sound, System, and Music components added. Full SPIKE Prime standard block coverage:
+58/68 leaf blocks implemented (10 hardware-impossible: 7 need 3x3 color matrix accessory, 3 need hub named audio).
+
+### Phase 4: Client/Bridge Split ⏳ Next
+TransportProfile abstraction, bridge extraction from the extension.
 
 ### Future: Multi-Hub Support
 - Extend to support LEGO Boost, EV3, SPIKE Essential (different protocols)

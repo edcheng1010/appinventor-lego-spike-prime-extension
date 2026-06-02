@@ -62,7 +62,8 @@ public class LegoSpikeSound extends AndroidNonvisibleComponent
     // Sound blocks
     // =========================================================================
 
-    @SimpleFunction(description = "Play a beep at the given frequency (Hz) for a duration (ms).")
+    @SimpleFunction(description = "Play a beep at the given frequency (Hz) for a duration (ms). "
+        + "Non-blocking — the hub continues processing other commands while the tone plays.")
     public void Beep(int freq, int duration) {
         if (!checkConnected()) return;
         connectivity.sendSSP(new SSPMessage("sound.beep")
@@ -70,12 +71,14 @@ public class LegoSpikeSound extends AndroidNonvisibleComponent
     }
 
     @SimpleFunction(description =
-        "Play a beep at the given pitch (Hz) for a number of seconds.")
+        "Play a beep at the given pitch (Hz) for a number of seconds. "
+        + "Non-blocking — the hub continues processing other commands while the tone plays.")
     public void PlayBeepForSeconds(int freq, double seconds) {
         Beep(freq, (int)(seconds * 1000));
     }
 
-    @SimpleFunction(description = "Start playing a continuous beep at the given frequency.")
+    @SimpleFunction(description = "Start playing a continuous beep at the given frequency. "
+        + "Non-blocking — use StopAllSounds() to stop it.")
     public void StartPlayingBeep(int freq) {
         if (!checkConnected()) return;
         connectivity.sendSSP(new SSPMessage("sound.beep").withParam("freq", freq));

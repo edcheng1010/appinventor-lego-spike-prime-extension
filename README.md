@@ -20,7 +20,7 @@ A multi-component App Inventor extension that enables real-time Bluetooth Low En
 - **Multi-hub classroom support** — designed for environments with many hubs operating simultaneously
 - **SPIKE Prime 3.x protocol** — uses the correct TunnelMessage architecture (program upload + real-time commands)
 - **COBS encoding** — full implementation of LEGO's custom framing protocol
-- **Modular component design** — separate blocks for Connectivity, Motors, Movement, Light, and Sensors
+- **Modular component design** — 8 components: Connectivity, Motors, Movement, Light, Sensors, Sound, System, and Music
 
 ## Components
 
@@ -31,6 +31,9 @@ A multi-component App Inventor extension that enables real-time Bluetooth Low En
 | `LegoSpikeMovement` | Coordinated drive base movement |
 | `LegoSpikeLight` | LED matrix and status light control |
 | `LegoSpikeSensors` | Color, distance, force, and tilt sensor readings |
+| `LegoSpikeSound` | Hub speaker beeps and tone control |
+| `LegoSpikeSystem` | Battery, temperature, charging, and RSSI reads |
+| `LegoSpikeMusic` | Note sequences and musical playback |
 
 ## Requirements
 
@@ -44,9 +47,7 @@ A multi-component App Inventor extension that enables real-time Bluetooth Low En
 1. Download the latest `.aix` release from [Releases](../../releases).
 2. In App Inventor, go to **Extensions → Import Extension** → upload the `.aix` file.
 3. Also import the [MIT BluetoothLE extension](https://mit-cml.github.io/extensions/).
-4. Wire the required events in your blocks:
-   - `BluetoothLE1.BytesReceived` → `LegoSpikeConnectivity1.OnBytesReceivedFromHub`
-   - `BluetoothLE1.ConnectionFailed` → `LegoSpikeConnectivity1.OnConnectionFailed`
+4. Wire `LegoSpikeConnectivity1.HubConnected` to initialize your other components.
 5. Use `LegoSpikeConnectivity1.StartScanning` to find nearby hubs.
 6. Connect, and start controlling your robot!
 
@@ -72,7 +73,7 @@ This is different from older LEGO hubs (Boost, SPIKE Essential) which accept dir
 
 ## Project Status
 
-This extension implements [SSP v0.6](https://github.com/edcheng1010/solaria-hub/blob/main/spec/SSP-v0.6.md) — the Solaria Standard Protocol — for full bidirectional communication with the hub. Active development continues toward Phase 3 (expanded block surface) and Phase 5 (classroom multi-hub). Current state:
+This extension implements [SSP v0.8](https://github.com/edcheng1010/solaria-hub/blob/main/spec/SSP-v0.8.md) — the Solaria Standard Protocol — for full bidirectional communication with the hub. Phases 1–3 are complete; Phase 4 (client/bridge split) is next. Current state:
 
 - [x] BLE scanning and connection (stable)
 - [x] Ghost device filtering via RSSI staleness
@@ -82,6 +83,7 @@ This extension implements [SSP v0.6](https://github.com/edcheng1010/solaria-hub/
 - [x] Full motor control API (phase 2 complete)
 - [x] Sensor streaming (phase 2 complete)
 - [x] LED matrix patterns (phase 2 complete)
+- [x] Sound, System, and Music components (phase 3 complete — 103 hardware tests passed)
 - [ ] Multi-hub simultaneous control (planned)
 
 ## Building from Source
@@ -103,6 +105,9 @@ See [docs/COMPILATION_AND_DEBUGGING.md](docs/COMPILATION_AND_DEBUGGING.md) for d
 Contributions are welcome! Please read [CONTRIBUTING.md](CONTRIBUTING.md) before submitting a PR.
 
 If you're interested in building bridges for other hardware platforms, check out the [Solaria project](https://github.com/edcheng1010/solaria-hub).
+
+---
+**Trademark Notice:** LEGO® and SPIKE™ are trademarks of the LEGO Group. App Inventor is a trademark of MIT. This project is not affiliated with or endorsed by any trademark holder. See [NOTICE](./NOTICE) for details.
 
 ## License
 

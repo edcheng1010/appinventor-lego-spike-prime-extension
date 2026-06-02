@@ -1,14 +1,14 @@
 > *Unofficial — independent open-source project, not affiliated with the LEGO Group or the Massachusetts Institute of Technology. See [NOTICE](../NOTICE) for trademark and licensing details.*
 
-# SSP v0.6 Bridge Guide — LEGO SPIKE Prime
+# SSP v0.8 Bridge Guide — LEGO SPIKE Prime
 
-This document maps every App Inventor block to its [SSP v0.6](https://github.com/edcheng1010/solaria-hub/blob/main/spec/SSP-v0.6.md) command and describes the transport profile used by this bridge.
+This document maps every App Inventor block to its [SSP v0.8](https://github.com/edcheng1010/solaria-hub/blob/main/spec/SSP-v0.6.md) command and describes the transport profile used by this bridge.
 
 ---
 
 ## Transport Profile
 
-This bridge implements the `spike-prime-3.x` transport profile (SSP v0.6 §2.1):
+This bridge implements the `spike-prime-3.x` transport profile (SSP v0.8 §2.1):
 
 | Field | Value |
 |---|---|
@@ -158,7 +158,7 @@ Sensor event JSON format received from hub:
 
 ---
 
-## Error Codes (SSP v0.6 §7)
+## Error Codes (SSP v0.8 §7)
 
 | Code range | Category | Example |
 |---|---|---|
@@ -181,7 +181,7 @@ The extension sends `{"cmd":"system.ping"}` every 5 seconds after capability is 
 
 If you are adding support for a new hardware platform following the Solaria Type 2 pattern:
 
-1. Define a transport profile (SSP v0.6 §2.1) for the new hardware's BLE/Serial framing.
+1. Define a transport profile (SSP v0.8 §2.1) for the new hardware's BLE/Serial framing.
 2. Write a hub-side program (or firmware) that emits a capability declaration on startup and handles SSP JSON commands.
 3. Create a `SolariaXxx.aix` App Inventor extension that wraps the SSP JSON commands with the new transport profile.
 4. Reference the [solaria-hub ARCHITECTURE.md](https://github.com/edcheng1010/solaria-hub/blob/main/ARCHITECTURE.md) for the full Type 1 / Type 2 hybrid model.

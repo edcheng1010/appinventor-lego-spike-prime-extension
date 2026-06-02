@@ -41,10 +41,10 @@ The [IMPLEMENTATION_PLAN.md](docs/IMPLEMENTATION_PLAN.md) breaks the next ~12 mo
 | Phase | Status | What's needed |
 |---|---|---|
 | 1 — Foundation | ✅ Complete | — |
-| 2 — SSP v0.6 migration | ⏳ Next | Hub-side Python rewrite, Java SSP infrastructure, component migration |
-| 3 — Post-MVP block expansion | After Phase 2 | New Sound / System / Music components, IMU blocks, threshold events |
-| 4 — Client/bridge split | After Phase 3 | TransportProfile abstraction, bridge extraction |
-| 5 — Multi-hub support | Long-term | LWP, EV3 (RFCOMM), Arduino bridges |
+| 2 — SSP v0.8 migration | ✅ Complete | — |
+| 3 — Post-MVP block expansion | ✅ Complete | — |
+| 4 — Client/bridge split | ⏳ Next | — |
+| 5 — Multi-hub support | Long-term | — |
 
 Each phase has explicit acceptance criteria. If you want to take on a section, open an issue first so we can coordinate — phase work needs to land in order (e.g., Phase 2 should not start until Phase 1 acceptance criteria are reverified).
 
@@ -53,7 +53,7 @@ Each phase has explicit acceptance criteria. If you want to take on a section, o
 Have an idea for a block the extension should expose? Open an issue describing:
 - What the block does (from a user's / student's perspective)
 - Which existing SPIKE Prime hardware capability it maps to
-- How it relates to SSP v0.6's standard commands (or if a v0.7+ spec addition is needed first)
+- How it relates to SSP v0.8's standard commands (or if a v0.7+ spec addition is needed first)
 
 For SSP spec changes, the discussion happens at [solaria-hub](https://github.com/edcheng1010/solaria-hub) — see that repo's CONTRIBUTING for the wishlist process.
 
