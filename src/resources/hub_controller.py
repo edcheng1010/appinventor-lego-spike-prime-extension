@@ -8,6 +8,19 @@
 # It runs entirely on the hub via the Python TunnelMessage facility.
 #
 # See: https://github.com/edcheng1010/solaria-hub/blob/main/spec/SSP-v0.8.md
+#
+# SSP v0.8 compliance notes:
+#   STANDARD: motor.*, movement.*, led.matrix.*, led.set/off, sound.beep/play/stop/
+#             set_volume/read, sensor.subscribe/unsubscribe/read, system.ping/info/
+#             subscribe/unsubscribe/read/reset, orientation.*
+#   STUB:     system.dfu — returns error 501 (firmware update not supported here)
+#   UNSUPPORTED: batch — declared supports_batch:false in capability
+#
+# Non-standard extensions (not in SSP v0.8 spec, implemented for App Inventor bridge):
+#   timer.get / timer.reset  — hub-side elapsed timer (replaces client-side clock)
+#   led.distance             — distance sensor indicator LEDs (4-pixel array)
+#   led.matrix.rotate        — incremental rotation (complement to led.matrix.orientation)
+#   sound.rest               — blocking silence for music sequencing
 
 import hub, motor, motor_pair, time, math
 from hub import light_matrix, port
@@ -1105,6 +1118,11 @@ def _handle_system(cmd, obj, req_id):
 
     elif action == 'reset':
         pass  # no-op on this platform
+
+    elif action == 'dfu':
+        # SSP v0.8 spec defines system.dfu for firmware update initiation.
+        # Not supported in this bridge — respond with a clear error.
+        _send_error(501, 'system.dfu not supported on this bridge', req_id)
 
 
 def _handle_timer(cmd, obj, req_id):

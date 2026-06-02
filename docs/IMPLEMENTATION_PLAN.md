@@ -699,7 +699,6 @@ These remain unresolved and should be answered before / during the relevant phas
 2. Within a phase, tasks must be completed in section order. Within §2.3 (component migration), Connectivity must land first — other components depend on `CapabilityStore` integration.
 3. Do not mark a phase complete until all acceptance criteria are verified on a physical hub.
 4. v0.7 wishlist already filed and integrated (solaria-hub #8). Open a v0.8 wishlist only if Phase 3 implementation surfaces concrete needs for motor acceleration, MIDI semantics, or sound-completion events — don't file speculatively.
-5. Before committing, check that no MIT Hong Kong Innovation Node references have crept back in (the repo is public).
-6. Commit messages: plain, no Co-Authored-By trailer (project owner preference).
+5. Commit messages: plain, no Co-Authored-By trailer (project owner preference).
 7. Do not push to remote without explicit per-commit approval from the project owner.
 8. Phase 2 perf gate (§2.5.5) is a hard merge blocker — if JSON drops payloads, switch to binary encoding (v0.6 §3.2) before merging.

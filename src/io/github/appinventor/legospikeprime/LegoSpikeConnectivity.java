@@ -1138,6 +1138,9 @@ public class LegoSpikeConnectivity extends AndroidNonvisibleComponent {
         "    elif action == 'reset':\n" +
         "        pass  # no-op on this platform\n" +
         "\n" +
+        "    elif action == 'dfu':\n" +
+        "        _send_error(501, 'system.dfu not supported on this bridge', req_id)\n" +
+        "\n" +
         "\n" +
         "def _handle_timer(cmd, obj, req_id):\n" +
         "    global _timer_start\n" +
