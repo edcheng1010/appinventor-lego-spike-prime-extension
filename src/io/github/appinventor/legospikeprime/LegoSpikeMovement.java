@@ -22,7 +22,7 @@ import com.google.appinventor.components.runtime.ComponentContainer;
  * One LegoSpikeMovement instance controls one drivebase pair.
  */
 @SimpleObject(external = true)
-@DesignerComponent(version = 4,
+@DesignerComponent(version = 5,
     description = "Controls a two-motor drivebase on a LEGO SPIKE Prime hub. "
         + "Set LeftPort, RightPort, and Direction, then call SetMovementMotors and StartMoving. "
         + "Set the Connectivity property to a LegoSpikeConnectivity component.",
@@ -250,9 +250,26 @@ public class LegoSpikeMovement extends AndroidNonvisibleComponent {
     }
 
     @SimpleFunction(description =
-        "Set cm per full wheel rotation (used when MoveForDuration uses 'rotations' unit).")
+        "Set cm per full wheel rotation. Used by MoveForDistance to convert centimetres to "
+        + "motor degrees. Default: 17.6 cm (≈56 mm wheel circumference). Adjust to match "
+        + "your actual wheels.")
     public void SetMovementRotationDistance(double cmPerRotation) {
         this.cmPerRotation = Math.max(0.1, cmPerRotation);
+    }
+
+    @SimpleFunction(description =
+        "Move the drivebase a specific distance in centimetres. "
+        + "Converts cm → degrees client-side using the SetMovementRotationDistance value "
+        + "(default 17.6 cm/rotation). Uses the configured Direction and Speed. "
+        + "Matches the LEGO SPIKE 'move [N] cm' block.")
+    public void MoveForDistance(double cm) {
+        if (!checkConnected()) return;
+        int effectiveSpeed = direction.equalsIgnoreCase("backward") ? -movementSpeed : movementSpeed;
+        int degrees = (int) Math.round((cm / cmPerRotation) * 360.0);
+        connectivity.sendSSP(new SSPMessage("movement.drive")
+            .withParam("left", leftPort).withParam("right", rightPort)
+            .withParam("speed", effectiveSpeed).withParam("steering", 0)
+            .withParam("duration", degrees).withParam("duration_unit", "degrees"));
     }
 
     @SimpleFunction(description =
