@@ -112,20 +112,22 @@ The extension must contain a Python program string that gets uploaded to the hub
 4. **Commit small, logical changes.** Use Git branching for experimental features.
 5. **Never modify files without explicit approval from Edward (project owner).**
 
-## Development Phases
+## Development Epics
 
-### Phase 1: Foundation ✅ Complete
+> **Terminology:** "Epic SPIKE-N" = repo-internal milestone. Ecosystem eras are **Generations (Gen 1–4)** — see [solaria-hub ROADMAP](https://github.com/edcheng1010/solaria-hub/blob/main/ROADMAP.md).
+
+### Epic SPIKE-1: Foundation ✅ Complete
 Protocol correction, COBS encoding, BLE connection reliability.
 
-### Phase 2: SSP v0.8 Migration ✅ Complete
+### Epic SPIKE-2: SSP v0.8 Migration ✅ Complete
 Hub-side Python rewrite (SSP v0.8), Java SSP infrastructure, full component migration.
 103 hardware test cases passed. 161+ Java unit tests passing.
 
-### Phase 3: Post-MVP Block Expansion ✅ Complete
+### Epic SPIKE-3: Post-MVP Block Expansion ✅ Complete
 Sound, System, and Music components added. Full SPIKE Prime standard block coverage:
 58/68 leaf blocks implemented (10 hardware-impossible: 7 need 3x3 color matrix accessory, 3 need hub named audio).
 
-### Phase 4: Client/Bridge Split ⏳ Next
+### Epic SPIKE-4: Client/Bridge Split ⏳ Next
 TransportProfile abstraction, bridge extraction from the extension.
 
 ### Future: Multi-Hub Support

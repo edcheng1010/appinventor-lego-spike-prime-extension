@@ -14,7 +14,7 @@ This guide provides instructions for compiling the LEGO SPIKE Prime App Inventor
 ### Directory Structure
 Your local repository should look like this:
 ```
-appinventor-lego-spike-prime-extension/
+solaria-appinventor-spike-prime/
 ├── build.xml
 ├── config/
 │   └── extension.json
@@ -29,7 +29,7 @@ appinventor-lego-spike-prime-extension/
 1. Open the Windows Command Prompt (`cmd.exe`).
 2. Navigate to the root directory of your cloned repository:
    ```cmd
-   cd path\to\appinventor-lego-spike-prime-extension
+   cd path\to\solaria-appinventor-spike-prime
    ```
 3. Run the Ant build command:
    ```cmd

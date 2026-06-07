@@ -2,6 +2,8 @@
 
 > **Unofficial integration.** Independent open-source project, not affiliated with the LEGO Group or the Massachusetts Institute of Technology. See [NOTICE](../NOTICE) for trademark and licensing details.
 
+> **Terminology note:** "Phase N" in this document = this repo's internal development milestones (equivalently **Epic SPIKE-N**), distinct from the ecosystem-level **Generations (Gen 1–4)** in [solaria-hub](https://github.com/edcheng1010/solaria-hub/blob/main/ROADMAP.md). Historical labels are retained for traceability.
+
 **Last revised:** 2026-06-03
 **Targeting:** SSP v0.8
 **Status:** Phase 1, Phase 2, and Phase 3 complete · Phase 4 next

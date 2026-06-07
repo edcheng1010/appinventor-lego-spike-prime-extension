@@ -6,7 +6,7 @@ Thank you for your interest in contributing. This extension is part of the [Sola
 
 Before contributing, please read:
 - [ARCHITECTURE.md](ARCHITECTURE.md) — the technical design, including the critical architectural rules (BLE UUIDs, RSSI staleness, null-safe callbacks)
-- [docs/IMPLEMENTATION_PLAN.md](docs/IMPLEMENTATION_PLAN.md) — the five-phase roadmap and current SSP integration target
+- [docs/IMPLEMENTATION_PLAN.md](docs/IMPLEMENTATION_PLAN.md) — the five-epic roadmap and current SSP integration target (uses legacy "Phase N" labels — see the terminology note at the top of that doc)
 - [CLAUDE.md](CLAUDE.md) — concise summary of the same architectural rules
 
 ---
@@ -34,19 +34,19 @@ Bugs that block the classroom-reliability goals (multi-hub stability, reconnecti
 
 Small doc PRs are very welcome — they're the easiest way to get started.
 
-### 3. Implement a Phase Item
+### 3. Implement an Epic
 
-The [IMPLEMENTATION_PLAN.md](docs/IMPLEMENTATION_PLAN.md) breaks the next ~12 months of work into five phases:
+The [IMPLEMENTATION_PLAN.md](docs/IMPLEMENTATION_PLAN.md) breaks the next ~12 months of work into five repo-internal epics (labelled "Phase N" inside that doc for historical continuity — equivalent to **Epic SPIKE-N**):
 
-| Phase | Status | What's needed |
+| Epic | Status | What's needed |
 |---|---|---|
-| 1 — Foundation | ✅ Complete | — |
-| 2 — SSP v0.8 migration | ✅ Complete | — |
-| 3 — Post-MVP block expansion | ✅ Complete | — |
-| 4 — Client/bridge split | ⏳ Next | — |
-| 5 — Multi-hub support | Long-term | — |
+| Epic SPIKE-1 — Foundation | ✅ Complete | — |
+| Epic SPIKE-2 — SSP v0.8 migration | ✅ Complete | — |
+| Epic SPIKE-3 — Post-MVP block expansion | ✅ Complete | — |
+| Epic SPIKE-4 — Client/bridge split | ⏳ Next | — |
+| Epic SPIKE-5 — Multi-hub support | Long-term | — |
 
-Each phase has explicit acceptance criteria. If you want to take on a section, open an issue first so we can coordinate — phase work needs to land in order (e.g., Phase 2 should not start until Phase 1 acceptance criteria are reverified).
+Each epic has explicit acceptance criteria. If you want to take on a section, open an issue first so we can coordinate — epics need to land in order (e.g., Epic SPIKE-2 should not start until Epic SPIKE-1 acceptance criteria are reverified).
 
 ### 4. Propose a New Block or Feature
 
@@ -59,7 +59,7 @@ For SSP spec changes, the discussion happens at [solaria-hub](https://github.com
 
 ### 5. Test with New Hardware
 
-Have a SPIKE Prime variant, firmware version, or Android device that isn't yet validated? File a "compatibility report" issue describing what works and what doesn't. This information directly feeds Phase 2's acceptance criteria.
+Have a SPIKE Prime variant, firmware version, or Android device that isn't yet validated? File a "compatibility report" issue describing what works and what doesn't. This information directly feeds Epic SPIKE-2's acceptance criteria.
 
 ---
 
@@ -83,7 +83,7 @@ Compiled `.aix` lands in `build/extensions/`. See [docs/COMPILATION_AND_DEBUGGIN
 
 ### Testing
 
-Most behaviour requires a physical hub — the App Inventor emulator cannot test BLE extensions reliably. The IMPLEMENTATION_PLAN.md acceptance criteria for each phase document what must be verified before merging.
+Most behaviour requires a physical hub — the App Inventor emulator cannot test BLE extensions reliably. The IMPLEMENTATION_PLAN.md acceptance criteria for each epic document what must be verified before merging.
 
 Unit tests run via:
 
@@ -101,10 +101,10 @@ ant test
 4. For code changes:
    - Run `ant build` and `ant test` to verify the build passes
    - Verify changed behaviour on a physical hub (or note in the PR description that physical-hub testing is pending)
-   - Update relevant docs (ARCHITECTURE.md if rules change, IMPLEMENTATION_PLAN.md if phase scope shifts)
+   - Update relevant docs (ARCHITECTURE.md if rules change, IMPLEMENTATION_PLAN.md if epic scope shifts)
 5. Open a PR with:
    - What changed and why
-   - Which phase / IMPLEMENTATION_PLAN section the work belongs to (if applicable)
+   - Which epic / IMPLEMENTATION_PLAN section the work belongs to (if applicable)
    - Test plan checklist (what was verified, what's outstanding)
 6. Respond to review feedback. The maintainer (currently Edward Cheng) reviews PRs personally.
 
@@ -113,7 +113,7 @@ ant test
 ## Code Style and Conventions
 
 - **Java:** Match the existing code style — no formal formatter enforced, but new code should be visually consistent with neighboring code. Use the existing `@SimpleFunction` / `@SimpleEvent` / `@SimpleProperty` / `@DesignerProperty` patterns from the 5 working components.
-- **Python (hub-side):** MicroPython-compatible, no external dependencies beyond what SPIKE Prime FW 3.x ships with. The current hub-side program is embedded in Java as a string constant; Phase 4 will move it to its own repo.
+- **Python (hub-side):** MicroPython-compatible, no external dependencies beyond what SPIKE Prime FW 3.x ships with. The current hub-side program is embedded in Java as a string constant; Epic SPIKE-4 will move it to its own repo.
 - **Architectural rules in [CLAUDE.md](CLAUDE.md) (Rules 1–8):** these are not negotiable. UUIDs, RSSI staleness, null-safe BLE callbacks, scanning-state management, and reflection-parameter-type correctness must be preserved. PRs that violate these rules will be sent back for revision.
 
 ---

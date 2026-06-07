@@ -55,7 +55,7 @@ Over 17 iterations, several critical decisions were made to solve specific hardw
 - **Problem:** Scanning while trying to connect causes connection failures.
 - **Current Solution:** The extension explicitly stops scanning before initiating a connection, and uses a `wasScanningBeforeConnection` flag to resume scanning if the connection fails or drops.
 
-## 4. SSP v0.6 WIRE PROTOCOL (Phase 2 — current implementation)
+## 4. SSP v0.6 WIRE PROTOCOL (Epic SPIKE-2 — current implementation)
 
 **This section supersedes the old "CRITICAL PROTOCOL CORRECTION" note.** The extension now implements [SSP v0.6](https://github.com/edcheng1010/solaria-hub/blob/main/spec/SSP-v0.6.md) — the Solaria Standard Protocol — for all motor, sensor, and LED commands. See `docs/SSP_BRIDGE_GUIDE.md` for the full SPIKE Prime → SSP mapping.
 

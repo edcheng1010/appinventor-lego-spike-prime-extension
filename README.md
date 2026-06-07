@@ -82,10 +82,10 @@ This extension implements [SSP v0.8](https://github.com/edcheng1010/solaria-hub/
 - [x] COBS encoding/decoding
 - [x] Program upload protocol (ClearSlot → StartFileUpload → TransferChunk → ProgramFlow)
 - [x] TunnelMessage send/receive
-- [x] Full motor control API (phase 2 complete)
-- [x] Sensor streaming (phase 2 complete)
-- [x] LED matrix patterns (phase 2 complete)
-- [x] Sound, System, and Music components (phase 3 complete — 103 hardware tests passed)
+- [x] Full motor control API (Epic SPIKE-2 complete)
+- [x] Sensor streaming (Epic SPIKE-2 complete)
+- [x] LED matrix patterns (Epic SPIKE-2 complete)
+- [x] Sound, System, and Music components (Epic SPIKE-3 complete — 103 hardware tests passed)
 - [ ] Multi-hub simultaneous control (planned)
 
 ## Building from Source

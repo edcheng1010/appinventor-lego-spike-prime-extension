@@ -1,5 +1,7 @@
 > *Unofficial — independent open-source project, not affiliated with the LEGO Group or the Massachusetts Institute of Technology. See [NOTICE](../NOTICE) for trademark and licensing details.*
 
+> **Terminology note:** "Phase N" in this document = this repo's internal development milestones (equivalently **Epic SPIKE-N**), distinct from the ecosystem-level **Generations (Gen 1–4)** in [solaria-hub](https://github.com/edcheng1010/solaria-hub/blob/main/ROADMAP.md). Historical labels are retained for traceability.
+
 # The Definitive Claude Code Playbook
 
 **Date:** April 26, 2026
@@ -15,7 +17,7 @@ This is the single, definitive guide for Edward to follow. Do not use any previo
 1. Open Command Prompt on your Windows machine.
 2. Navigate to the project directory:
    ```cmd
-   cd C:\Projects\appinventor-lego-spike-prime-extension
+   cd C:\Projects\solaria-appinventor-spike-prime
    ```
 3. Pull the latest changes (this includes the critical UUID fix I just made):
    ```cmd
